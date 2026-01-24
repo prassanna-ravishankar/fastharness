@@ -4,15 +4,11 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Wrap Claude Agent SDK and expose agents as [A2A](https://github.com/google/A2A)-compliant services.
+Building agents with the Claude SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://github.com/google/A2A) protocol.
 
-## Features
+The library provides a decorator-based API where you define agent behavior and FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, and managing async task execution. A simple agent requires only a name, description, and list of skills. For complex workflows that need multi-turn reasoning or custom control flow, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
 
-- **A2A Protocol** - Full compliance with Google's Agent-to-Agent protocol
-- **Simple API** - Decorator-based agent registration with `@agentloop`
-- **Multi-turn Support** - Custom execution loops for complex agent workflows
-- **FastAPI Integration** - Mount on existing FastAPI apps or run standalone
-- **LiteLLM Compatible** - Use any LLM provider via LiteLLM proxy
+FastHarness runs standalone or mounts onto existing FastAPI applications, making it suitable for both dedicated agent services and adding agent capabilities to existing APIs. The underlying Claude SDK calls can be routed through LiteLLM, enabling use of alternative model providers without code changes.
 
 ## Installation
 
