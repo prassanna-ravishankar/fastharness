@@ -1,6 +1,18 @@
 # FastHarness
 
+[![CI](https://github.com/prassanna-ravishankar/fastharness/actions/workflows/test.yml/badge.svg)](https://github.com/prassanna-ravishankar/fastharness/actions/workflows/test.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 Wrap Claude Agent SDK and expose agents as [A2A](https://github.com/google/A2A)-compliant services.
+
+## Features
+
+- **A2A Protocol** - Full compliance with Google's Agent-to-Agent protocol
+- **Simple API** - Decorator-based agent registration with `@agentloop`
+- **Multi-turn Support** - Custom execution loops for complex agent workflows
+- **FastAPI Integration** - Mount on existing FastAPI apps or run standalone
+- **LiteLLM Compatible** - Use any LLM provider via LiteLLM proxy
 
 ## Installation
 
@@ -65,6 +77,33 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.mount("/agents", harness.app)
 ```
+
+## HarnessClient Options
+
+The `HarnessClient` passed to agent functions supports these options:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `system_prompt` | `None` | System prompt for Claude |
+| `tools` | `[]` | Allowed tools (e.g., `["Read", "Grep", "Glob"]`) |
+| `model` | `claude-sonnet-4-20250514` | Claude model to use |
+| `max_turns` | `None` | Maximum conversation turns |
+| `permission_mode` | `bypassPermissions` | Permission handling mode |
+
+Override per-call:
+```python
+result = await client.run(prompt, model="claude-opus-4-20250514", max_turns=5)
+```
+
+## A2A Endpoints
+
+Running FastHarness exposes these endpoints:
+
+| Endpoint | Description |
+|----------|-------------|
+| `/.well-known/agent-card.json` | Agent metadata and capabilities |
+| `/` | JSON-RPC endpoint (`message/send`, `tasks/get`, etc.) |
+| `/docs` | Interactive documentation |
 
 ## LiteLLM Support
 
