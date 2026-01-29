@@ -37,6 +37,19 @@ class TestHarnessClientConfig:
         assert client.permission_mode == "default"
 
 
+    def test_default_output_format(self) -> None:
+        client = HarnessClient()
+        assert client.output_format is None
+
+    def test_custom_output_format(self) -> None:
+        schema = {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"x": {"type": "integer"}}},
+        }
+        client = HarnessClient(output_format=schema)
+        assert client.output_format == schema
+
+
 class TestBuildOptions:
     """Tests for _build_options method."""
 
@@ -74,6 +87,24 @@ class TestBuildOptions:
         client = HarnessClient(permission_mode="bypassPermissions")
         options = client._build_options(permission_mode="default")
         assert options.permission_mode == "default"
+
+    def test_build_options_output_format(self) -> None:
+        schema = {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"y": {"type": "string"}}},
+        }
+        client = HarnessClient(output_format=schema)
+        options = client._build_options()
+        assert options.output_format == schema
+
+    def test_build_options_output_format_override(self) -> None:
+        client = HarnessClient()
+        schema = {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"z": {"type": "number"}}},
+        }
+        options = client._build_options(output_format=schema)
+        assert options.output_format == schema
 
     def test_build_options_preserves_defaults(self) -> None:
         client = HarnessClient(

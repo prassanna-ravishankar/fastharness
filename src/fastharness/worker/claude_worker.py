@@ -36,7 +36,7 @@ class AgentRegistry:
 
 
 @dataclass
-class ClaudeWorker(Worker[list[dict[str, Any]]]):
+class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
     """Worker implementation that executes tasks using Claude SDK.
 
     Bridges the A2A protocol with the Claude Agent SDK.
@@ -149,6 +149,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):
                 max_turns=config.max_turns,
                 mcp_servers=config.mcp_servers,
                 setting_sources=config.setting_sources,
+                output_format=config.output_format,
             )
 
             # Execute agent

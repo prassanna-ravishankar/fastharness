@@ -111,6 +111,7 @@ class FastHarness:
         model: str = "claude-sonnet-4-20250514",
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
+        output_format: dict[str, Any] | None = None,
     ) -> Agent:
         """Register a simple agent (config-only, no custom loop).
 
@@ -126,6 +127,8 @@ class FastHarness:
             model: Claude model to use.
             mcp_servers: MCP servers to connect (dict of name -> config).
             setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
+            output_format: JSON schema for structured output
+                (e.g., {"type": "json_schema", "schema": {...}}).
 
         Returns:
             The registered Agent.
@@ -140,6 +143,7 @@ class FastHarness:
             model=model,
             mcp_servers=mcp_servers or {},
             setting_sources=setting_sources if setting_sources is not None else ["project"],
+            output_format=output_format,
         )
         agent = Agent(config=config, func=None)
         self._agents[name] = agent
@@ -161,6 +165,7 @@ class FastHarness:
         model: str = "claude-sonnet-4-20250514",
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
+        output_format: dict[str, Any] | None = None,
     ) -> Callable[[AgentFunc], Agent]:
         """Decorator to register an agent with custom loop logic.
 
@@ -176,6 +181,8 @@ class FastHarness:
             model: Claude model to use.
             mcp_servers: MCP servers to connect (dict of name -> config).
             setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
+            output_format: JSON schema for structured output
+                (e.g., {"type": "json_schema", "schema": {...}}).
 
         Returns:
             Decorator that registers the agent function.
@@ -202,6 +209,7 @@ class FastHarness:
                 model=model,
                 mcp_servers=mcp_servers or {},
                 setting_sources=setting_sources if setting_sources is not None else ["project"],
+                output_format=output_format,
             )
             agent = Agent(config=config, func=func)
             self._agents[name] = agent

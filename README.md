@@ -155,7 +155,6 @@ Log intermediate steps for debugging:
 from fastharness import ConsoleStepLogger
 
 client = HarnessClient(
-    enable_step_logging=True,
     step_logger=ConsoleStepLogger(),
 )
 result = await client.run(prompt)
@@ -191,7 +190,7 @@ The `HarnessClient` passed to agent functions supports these options:
 | `setting_sources` | `["project"]` | Filesystem settings to load (loads CLAUDE.md) |
 | `telemetry_callbacks` | `[]` | Callbacks for execution metrics |
 | `step_logger` | `None` | Logger for intermediate steps |
-| `enable_step_logging` | `False` | Enable step logging if logger provided |
+| `output_format` | `None` | JSON schema for structured output (e.g., `{"type": "json_schema", "schema": {...}}`) |
 
 Override per-call:
 ```python

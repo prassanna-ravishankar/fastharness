@@ -106,6 +106,31 @@ class TestAgentConfig:
                 max_turns=0,
             )
 
+    def test_agent_config_output_format_default(self) -> None:
+        config = AgentConfig(
+            name="test",
+            description="Test",
+            skills=[Skill(id="s1", name="S1", description="Skill 1")],
+        )
+        assert config.output_format is None
+
+    def test_agent_config_output_format(self) -> None:
+        schema = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {"status": {"type": "string"}},
+                "required": ["status"],
+            },
+        }
+        config = AgentConfig(
+            name="test",
+            description="Test",
+            skills=[Skill(id="s1", name="S1", description="Skill 1")],
+            output_format=schema,
+        )
+        assert config.output_format == schema
+
 
 class TestAgent:
     """Tests for Agent dataclass."""
@@ -161,6 +186,20 @@ class TestFastHarness:
         assert agent.config.name == "assistant"
         assert agent.config.system_prompt == "Be helpful"
         assert agent.func is None
+
+    def test_agent_registration_with_output_format(self) -> None:
+        harness = FastHarness(name="test")
+        schema = {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}},
+        }
+        agent = harness.agent(
+            name="structured",
+            description="Structured output agent",
+            skills=[Skill(id="s1", name="S1", description="S1")],
+            output_format=schema,
+        )
+        assert agent.config.output_format == schema
 
     def test_agentloop_registration(self) -> None:
         harness = FastHarness(name="test")

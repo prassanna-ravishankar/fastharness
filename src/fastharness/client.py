@@ -40,6 +40,7 @@ class HarnessClient:
     cwd: str | None = None
     permission_mode: PermissionModeType = "bypassPermissions"
     setting_sources: list[str] | None = field(default_factory=lambda: ["project"])
+    output_format: dict[str, Any] | None = None
     telemetry_callbacks: list[TelemetryCallback] = field(default_factory=list)
     step_logger: StepLogger | None = None
 
@@ -63,6 +64,7 @@ class HarnessClient:
             "cwd": self.cwd,
             "permission_mode": self.permission_mode,
             "setting_sources": self.setting_sources,
+            "output_format": self.output_format,
         }
         opts_dict.update(sdk_overrides)
         opts_dict.update(overrides)
@@ -143,21 +145,28 @@ class HarnessClient:
         )
         await self._emit_telemetry(message)
 
-    async def run(self, prompt: str, **opts: Any) -> str:
-        """Execute full agent loop, return final text.
+    async def run(self, prompt: str, **opts: Any) -> Any:
+        """Execute full agent loop, return final text or structured output.
+
+        When output_format is configured, returns the structured output
+        (parsed from the agent's JSON schema response). Otherwise returns
+        the final text response as a string.
 
         Args:
             prompt: The user prompt to send to the agent.
-            **opts: Override options (system_prompt, tools, model, max_turns, etc.)
+            **opts: Override options (system_prompt, tools, model, max_turns,
+                output_format, etc.)
 
         Returns:
-            The final text response from the agent.
+            Structured output if output_format is set and the agent returned
+            structured data, otherwise the final text response string.
 
         Raises:
-            RuntimeError: If Claude SDK execution fails.
+            RuntimeError: If Claude Agent SDK execution fails.
         """
         options = self._build_options(**opts)
         final_text = ""
+        structured_output: Any = None
         turn_number = 0
 
         try:
@@ -173,14 +182,18 @@ class HarnessClient:
                         await self._log_turn_complete(message, turn_number)
                         if message.result:
                             final_text = message.result
+                        structured_output = getattr(message, "structured_output", None)
                         turn_number += 1
                         break
         except Exception as e:
             logger.exception(
-                "Claude SDK execution failed",
+                "Claude Agent SDK execution failed",
                 extra={"prompt_preview": prompt[:100] if prompt else ""},
             )
             raise RuntimeError(f"Agent execution failed: {type(e).__name__}: {e}") from e
+
+        if structured_output is not None:
+            return structured_output
 
         return final_text
 
@@ -220,12 +233,15 @@ class HarnessClient:
                         await self._log_turn_complete(message, turn_number)
                         if message.result:
                             final_text = message.result
-                        yield DoneEvent(final_text=final_text)
+                        yield DoneEvent(
+                            final_text=final_text,
+                            structured_output=getattr(message, "structured_output", None),
+                        )
                         turn_number += 1
                         break
         except Exception as e:
             logger.exception(
-                "Claude SDK streaming failed",
+                "Claude Agent SDK streaming failed",
                 extra={"prompt_preview": prompt[:100] if prompt else ""},
             )
             raise RuntimeError(f"Agent streaming failed: {type(e).__name__}: {e}") from e
