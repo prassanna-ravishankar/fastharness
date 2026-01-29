@@ -27,15 +27,15 @@ harness = FastHarness(
 # Initialize cost tracker
 cost_tracker = CostTracker(warn_threshold_usd=0.5, error_threshold_usd=5.0)
 
-# Simple agent with step logging enabled
+# Simple agent - config only (no logging by default)
 harness.agent(
-    name="logged-assistant",
-    description="Assistant with detailed step logging",
+    name="simple-assistant",
+    description="Basic assistant without instrumentation",
     skills=[
         Skill(
             id="assist",
             name="Assist",
-            description="Provide assistance with step tracking",
+            description="Provide assistance",
         )
     ],
     system_prompt="You are a helpful assistant. Provide concise responses.",
@@ -63,6 +63,11 @@ async def tracked_researcher(
     prompt: str, ctx: AgentContext, client: HarnessClient
 ) -> str:
     """Research agent with cost tracking and step logging.
+
+    When this agent runs, you'll see output like:
+    [step_logger] Tool call: Read file.py
+    [step_logger] Assistant message: Found bug...
+    [step_logger] Turn complete: cost=$0.01, tokens=150
 
     Features:
     - Tracks API costs via telemetry callbacks
