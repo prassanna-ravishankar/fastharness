@@ -199,6 +199,7 @@ See the `examples/` directory for complete working examples:
 
 - **[simple_agent.py](examples/simple_agent.py)** - Standalone agent service with multi-agent support
 - **[fastapi_integration.py](examples/fastapi_integration.py)** - Mounting FastHarness on existing FastAPI app
+- **[advanced_features.py](examples/advanced_features.py)** - Cost tracking, step logging, and MCP server configuration
 
 Run examples:
 ```bash
