@@ -1,8 +1,8 @@
 """Cost tracking and telemetry for agent execution."""
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, Protocol, runtime_checkable
+from datetime import UTC, datetime
+from typing import Protocol, runtime_checkable
 
 from fastharness.logging import get_logger
 
@@ -24,9 +24,7 @@ class ExecutionMetrics:
     duration_api_ms: int
     num_turns: int
     status: str  # "success" or "error"
-    timestamp: datetime = field(
-        default_factory=lambda: datetime.now(timezone.utc)
-    )
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @runtime_checkable

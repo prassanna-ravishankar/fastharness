@@ -9,6 +9,8 @@ Demonstrates:
 Run with: uv run uvicorn examples.advanced_features:app --port 8000
 """
 
+import logging
+
 from fastharness import (
     AgentContext,
     ConsoleStepLogger,
@@ -17,6 +19,9 @@ from fastharness import (
     HarnessClient,
     Skill,
 )
+
+# Configure logging so fastharness telemetry/step output is visible
+logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
 
 harness = FastHarness(
     name="advanced-features",
@@ -59,9 +64,7 @@ harness.agent(
     system_prompt="You are a research assistant. Be thorough and structured.",
     tools=["Read", "WebSearch", "Glob"],
 )
-async def tracked_researcher(
-    prompt: str, ctx: AgentContext, client: HarnessClient
-) -> str:
+async def tracked_researcher(prompt: str, ctx: AgentContext, client: HarnessClient) -> str:
     """Research agent with cost tracking and step logging.
 
     When this agent runs, you'll see output like:
@@ -109,9 +112,7 @@ async def tracked_researcher(
     },
     tools=["Read", "Glob"],  # Add "mcp__example-server__*" if MCP server is enabled
 )
-async def mcp_agent(
-    prompt: str, ctx: AgentContext, client: HarnessClient
-) -> str:
+async def mcp_agent(prompt: str, ctx: AgentContext, client: HarnessClient) -> str:
     """Agent with MCP server support.
 
     MCP servers extend agent capabilities by connecting external services.

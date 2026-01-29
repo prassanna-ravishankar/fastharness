@@ -2,14 +2,13 @@
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
-    PermissionMode,
     ResultMessage,
     TextBlock,
 )
@@ -18,7 +17,7 @@ from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.logging import get_logger
 
 if TYPE_CHECKING:
-    from fastharness.step_logger import StepEvent, StepLogger
+    from fastharness.step_logger import StepLogger
     from fastharness.telemetry import TelemetryCallback
 
 logger = get_logger("client")
@@ -73,9 +72,7 @@ class HarnessClient:
 
         return ClaudeAgentOptions(**opts_dict)
 
-    async def _emit_telemetry(
-        self, result_msg: ResultMessage, task_id: str = "unknown"
-    ) -> None:
+    async def _emit_telemetry(self, result_msg: ResultMessage, task_id: str = "unknown") -> None:
         """Extract metrics from ResultMessage and notify callbacks."""
         if not self.telemetry_callbacks:
             return
@@ -87,27 +84,19 @@ class HarnessClient:
             task_id=task_id,
             session_id=getattr(result_msg, "session_id", "unknown"),
             total_cost_usd=getattr(result_msg, "total_cost_usd", None),
-            input_tokens=(
-                usage.get("input_tokens") if isinstance(usage, dict) else None
-            ),
-            output_tokens=(
-                usage.get("output_tokens") if isinstance(usage, dict) else None
-            ),
+            input_tokens=(usage.get("input_tokens") if isinstance(usage, dict) else None),
+            output_tokens=(usage.get("output_tokens") if isinstance(usage, dict) else None),
             cache_read_tokens=(
-                usage.get("cache_read_input_tokens")
-                if isinstance(usage, dict)
-                else None
+                usage.get("cache_read_input_tokens") if isinstance(usage, dict) else None
             ),
             cache_write_tokens=(
-                usage.get("cache_creation_input_tokens")
-                if isinstance(usage, dict)
-                else None
+                usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else None
             ),
             duration_ms=getattr(result_msg, "duration_ms", 0),
             duration_api_ms=getattr(result_msg, "duration_api_ms", 0),
             num_turns=getattr(result_msg, "num_turns", 1),
             status="success" if not getattr(result_msg, "is_error", False) else "error",
-            timestamp=datetime.now(timezone.utc),
+            timestamp=datetime.now(UTC),
         )
 
         for callback in self.telemetry_callbacks:
@@ -140,6 +129,7 @@ class HarnessClient:
         """
         options = self._build_options(**opts)
         final_text = ""
+        turn_number = 0
 
         try:
             async with ClaudeSDKClient(options) as client:
@@ -149,19 +139,47 @@ class HarnessClient:
                         for block in message.content:
                             if isinstance(block, TextBlock):
                                 final_text = block.text
+                                await self._log_step(
+                                    {
+                                        "step_type": "assistant_message",
+                                        "turn_number": turn_number,
+                                        "data": {"text": block.text},
+                                    }
+                                )
+                            elif hasattr(block, "name") and hasattr(block, "input"):
+                                await self._log_step(
+                                    {
+                                        "step_type": "tool_call",
+                                        "turn_number": turn_number,
+                                        "data": {
+                                            "name": getattr(block, "name", ""),
+                                            "id": getattr(block, "id", "unknown"),
+                                            "input": getattr(block, "input", {}),
+                                        },
+                                    }
+                                )
                     elif isinstance(message, ResultMessage):
+                        await self._log_step(
+                            {
+                                "step_type": "turn_complete",
+                                "turn_number": turn_number,
+                                "data": {
+                                    "cost_usd": getattr(message, "total_cost_usd", None),
+                                    "usage": getattr(message, "usage", None),
+                                },
+                            }
+                        )
                         await self._emit_telemetry(message)
                         if message.result:
                             final_text = message.result
+                        turn_number += 1
                         break
         except Exception as e:
             logger.exception(
                 "Claude SDK execution failed",
                 extra={"prompt_preview": prompt[:100] if prompt else ""},
             )
-            raise RuntimeError(
-                f"Agent execution failed: {type(e).__name__}: {e}"
-            ) from e
+            raise RuntimeError(f"Agent execution failed: {type(e).__name__}: {e}") from e
 
         return final_text
 
@@ -239,6 +257,4 @@ class HarnessClient:
                 "Claude SDK streaming failed",
                 extra={"prompt_preview": prompt[:100] if prompt else ""},
             )
-            raise RuntimeError(
-                f"Agent streaming failed: {type(e).__name__}: {e}"
-            ) from e
+            raise RuntimeError(f"Agent streaming failed: {type(e).__name__}: {e}") from e
