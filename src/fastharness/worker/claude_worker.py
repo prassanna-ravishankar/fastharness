@@ -36,7 +36,7 @@ class AgentRegistry:
 
 
 @dataclass
-class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
+class ClaudeWorker(Worker[list[dict[str, Any]]]):
     """Worker implementation that executes tasks using Claude SDK.
 
     Bridges the A2A protocol with the Claude Agent SDK.
@@ -108,7 +108,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
                 await self.storage.update_task(
                     task_id,
                     state="failed",
-                    new_messages=[error_message],
+                    new_messages=[error_message],  # type: ignore[arg-type]
                 )
                 return
 
@@ -147,7 +147,8 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
                 tools=config.tools,
                 model=config.model,
                 max_turns=config.max_turns,
-                mcp_servers={},  # TODO: Support MCP servers
+                mcp_servers=config.mcp_servers,
+                setting_sources=config.setting_sources,
             )
 
             # Execute agent
@@ -178,7 +179,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
             )
 
             # Update context with new messages
-            context_data.append(message)
+            context_data.append(message)  # type: ignore[arg-type]
             context_data.append(response_message)
             await self.storage.update_context(context_id, context_data)
 
@@ -187,7 +188,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
                 task_id,
                 state="completed",
                 new_artifacts=artifacts,
-                new_messages=[response_message],
+                new_messages=[response_message],  # type: ignore[arg-type]
             )
 
             logger.info(
@@ -216,7 +217,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
             await self.storage.update_task(
                 task_id,
                 state="failed",
-                new_messages=[error_message],
+                new_messages=[error_message],  # type: ignore[arg-type]
             )
 
         finally:

@@ -109,6 +109,8 @@ class FastHarness:
         tools: list[str] | None = None,
         max_turns: int | None = None,
         model: str = "claude-sonnet-4-20250514",
+        mcp_servers: dict[str, Any] | None = None,
+        setting_sources: list[str] | None = None,
     ) -> Agent:
         """Register a simple agent (config-only, no custom loop).
 
@@ -122,6 +124,8 @@ class FastHarness:
             tools: List of allowed tool names (e.g., ["Read", "Grep", "Glob"]).
             max_turns: Maximum number of turns.
             model: Claude model to use.
+            mcp_servers: MCP servers to connect (dict of name -> config).
+            setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
 
         Returns:
             The registered Agent.
@@ -134,6 +138,8 @@ class FastHarness:
             tools=tools or [],
             max_turns=max_turns,
             model=model,
+            mcp_servers=mcp_servers or {},
+            setting_sources=setting_sources,
         )
         agent = Agent(config=config, func=None)
         self._agents[name] = agent
@@ -153,6 +159,8 @@ class FastHarness:
         tools: list[str] | None = None,
         max_turns: int | None = None,
         model: str = "claude-sonnet-4-20250514",
+        mcp_servers: dict[str, Any] | None = None,
+        setting_sources: list[str] | None = None,
     ) -> Callable[[AgentFunc], Agent]:
         """Decorator to register an agent with custom loop logic.
 
@@ -166,6 +174,8 @@ class FastHarness:
             tools: List of allowed tool names.
             max_turns: Maximum number of turns.
             model: Claude model to use.
+            mcp_servers: MCP servers to connect (dict of name -> config).
+            setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
 
         Returns:
             Decorator that registers the agent function.
@@ -190,6 +200,8 @@ class FastHarness:
                 tools=tools or [],
                 max_turns=max_turns,
                 model=model,
+                mcp_servers=mcp_servers or {},
+                setting_sources=setting_sources,
             )
             agent = Agent(config=config, func=func)
             self._agents[name] = agent

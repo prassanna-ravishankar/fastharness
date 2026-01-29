@@ -79,6 +79,82 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/agents", harness.app)
 ```
 
+## v1.0.0 Features
+
+### CLAUDE.md Support
+
+Agents automatically load project settings from `CLAUDE.md` by default:
+
+```python
+harness.agent(
+    name="reviewer",
+    description="Code reviewer",
+    skills=[...],
+    system_prompt="You are a thorough code reviewer.",
+    # setting_sources=["project"] is default - loads CLAUDE.md automatically
+)
+
+# To disable, pass empty list:
+harness.agent(
+    name="readonly",
+    description="Read-only assistant",
+    skills=[...],
+    setting_sources=[],  # Don't load any settings
+)
+```
+
+### MCP Server Integration
+
+Connect external services via Model Context Protocol:
+
+```python
+harness.agent(
+    name="assistant",
+    description="Multi-tool assistant",
+    skills=[...],
+    mcp_servers={
+        "filesystem": {
+            "command": "node",
+            "args": ["mcp-server-stdio-filesystem"],
+        },
+    },
+    tools=["mcp__filesystem__read", "mcp__filesystem__write"],
+)
+```
+
+### Cost Tracking
+
+Monitor API costs with configurable thresholds:
+
+```python
+from fastharness import CostTracker
+
+tracker = CostTracker(warn_threshold_usd=1.0)
+
+@harness.agentloop(...)
+async def agent(prompt, ctx, client):
+    client.telemetry_callbacks.append(tracker)
+    result = await client.run(prompt)
+    print(f"Cost: ${tracker.total_cost_usd:.4f}")
+    return result
+```
+
+### Step Logging
+
+Log intermediate steps for debugging:
+
+```python
+from fastharness import ConsoleStepLogger
+
+client = HarnessClient(
+    enable_step_logging=True,
+    step_logger=ConsoleStepLogger(),
+)
+result = await client.run(prompt)
+```
+
+For migration from v0.x, see [MIGRATION.md](MIGRATION.md).
+
 ## HarnessClient Options
 
 The `HarnessClient` passed to agent functions supports these options:
