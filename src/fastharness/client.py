@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -15,10 +15,8 @@ from claude_agent_sdk import (
 
 from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.logging import get_logger
-
-if TYPE_CHECKING:
-    from fastharness.step_logger import StepLogger
-    from fastharness.telemetry import TelemetryCallback
+from fastharness.step_logger import StepEvent, StepLogger, StepType
+from fastharness.telemetry import ExecutionMetrics, TelemetryCallback
 
 logger = get_logger("client")
 
@@ -42,9 +40,8 @@ class HarnessClient:
     cwd: str | None = None
     permission_mode: PermissionModeType = "bypassPermissions"
     setting_sources: list[str] | None = field(default_factory=lambda: ["project"])
-    telemetry_callbacks: list["TelemetryCallback"] = field(default_factory=list)
-    step_logger: "StepLogger | None" = None
-    enable_step_logging: bool = False
+    telemetry_callbacks: list[TelemetryCallback] = field(default_factory=list)
+    step_logger: StepLogger | None = None
 
     def _build_options(self, **overrides: Any) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions, merging client config with overrides.
@@ -77,42 +74,74 @@ class HarnessClient:
         if not self.telemetry_callbacks:
             return
 
-        from fastharness.telemetry import ExecutionMetrics
-
         usage = getattr(result_msg, "usage", None)
+        usage_dict = usage if isinstance(usage, dict) else {}
         metrics = ExecutionMetrics(
             task_id=task_id,
             session_id=getattr(result_msg, "session_id", "unknown"),
             total_cost_usd=getattr(result_msg, "total_cost_usd", None),
-            input_tokens=(usage.get("input_tokens") if isinstance(usage, dict) else None),
-            output_tokens=(usage.get("output_tokens") if isinstance(usage, dict) else None),
-            cache_read_tokens=(
-                usage.get("cache_read_input_tokens") if isinstance(usage, dict) else None
-            ),
-            cache_write_tokens=(
-                usage.get("cache_creation_input_tokens") if isinstance(usage, dict) else None
-            ),
+            input_tokens=usage_dict.get("input_tokens"),
+            output_tokens=usage_dict.get("output_tokens"),
+            cache_read_tokens=usage_dict.get("cache_read_input_tokens"),
+            cache_write_tokens=usage_dict.get("cache_creation_input_tokens"),
             duration_ms=getattr(result_msg, "duration_ms", 0),
             duration_api_ms=getattr(result_msg, "duration_api_ms", 0),
             num_turns=getattr(result_msg, "num_turns", 1),
-            status="success" if not getattr(result_msg, "is_error", False) else "error",
+            status="error" if getattr(result_msg, "is_error", False) else "success",
             timestamp=datetime.now(UTC),
         )
 
         for callback in self.telemetry_callbacks:
-            await callback.on_complete(metrics)
+            try:
+                await callback.on_complete(metrics)
+            except Exception:
+                logger.exception(
+                    "Telemetry callback failed",
+                    extra={"callback": type(callback).__name__, "task_id": task_id},
+                )
 
-    async def _log_step(self, event: dict[str, Any]) -> None:
-        """Log a step if logging is enabled."""
-        if self.enable_step_logging and self.step_logger:
-            from fastharness.step_logger import StepEvent
+    async def _log_step(self, step_type: StepType, turn_number: int, data: dict[str, Any]) -> None:
+        """Log a step event if a step logger is configured."""
+        if self.step_logger:
+            try:
+                await self.step_logger.log_step(
+                    StepEvent(step_type=step_type, turn_number=turn_number, data=data)
+                )
+            except Exception:
+                logger.exception(
+                    "Step logging failed",
+                    extra={"step_type": step_type},
+                )
 
-            step_event = StepEvent(
-                step_type=event["step_type"],
-                turn_number=event["turn_number"],
-                data=event["data"],
-            )
-            await self.step_logger.log_step(step_event)
+    async def _log_assistant_blocks(self, content: list[Any], turn_number: int) -> None:
+        """Log assistant message blocks (text and tool use) if step logger is configured."""
+        if not self.step_logger:
+            return
+        for block in content:
+            if isinstance(block, TextBlock):
+                await self._log_step("assistant_message", turn_number, {"text": block.text})
+            elif hasattr(block, "name") and hasattr(block, "input"):
+                await self._log_step(
+                    "tool_call",
+                    turn_number,
+                    {
+                        "name": getattr(block, "name", ""),
+                        "id": getattr(block, "id", "unknown"),
+                        "input": getattr(block, "input", {}),
+                    },
+                )
+
+    async def _log_turn_complete(self, message: ResultMessage, turn_number: int) -> None:
+        """Log turn completion and emit telemetry."""
+        await self._log_step(
+            "turn_complete",
+            turn_number,
+            {
+                "cost_usd": getattr(message, "total_cost_usd", None),
+                "usage": getattr(message, "usage", None),
+            },
+        )
+        await self._emit_telemetry(message)
 
     async def run(self, prompt: str, **opts: Any) -> str:
         """Execute full agent loop, return final text.
@@ -139,37 +168,9 @@ class HarnessClient:
                         for block in message.content:
                             if isinstance(block, TextBlock):
                                 final_text = block.text
-                                await self._log_step(
-                                    {
-                                        "step_type": "assistant_message",
-                                        "turn_number": turn_number,
-                                        "data": {"text": block.text},
-                                    }
-                                )
-                            elif hasattr(block, "name") and hasattr(block, "input"):
-                                await self._log_step(
-                                    {
-                                        "step_type": "tool_call",
-                                        "turn_number": turn_number,
-                                        "data": {
-                                            "name": getattr(block, "name", ""),
-                                            "id": getattr(block, "id", "unknown"),
-                                            "input": getattr(block, "input", {}),
-                                        },
-                                    }
-                                )
+                        await self._log_assistant_blocks(message.content, turn_number)
                     elif isinstance(message, ResultMessage):
-                        await self._log_step(
-                            {
-                                "step_type": "turn_complete",
-                                "turn_number": turn_number,
-                                "data": {
-                                    "cost_usd": getattr(message, "total_cost_usd", None),
-                                    "usage": getattr(message, "usage", None),
-                                },
-                            }
-                        )
-                        await self._emit_telemetry(message)
+                        await self._log_turn_complete(message, turn_number)
                         if message.result:
                             final_text = message.result
                         turn_number += 1
@@ -205,48 +206,18 @@ class HarnessClient:
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, AssistantMessage):
+                        await self._log_assistant_blocks(message.content, turn_number)
                         for block in message.content:
                             if isinstance(block, TextBlock):
                                 final_text = block.text
-                                await self._log_step(
-                                    {
-                                        "step_type": "assistant_message",
-                                        "turn_number": turn_number,
-                                        "data": {"text": block.text},
-                                    }
-                                )
                                 yield TextEvent(text=block.text)
                             elif hasattr(block, "name") and hasattr(block, "input"):
-                                # ToolUseBlock
-                                tool_name = getattr(block, "name", "")
-                                tool_input = getattr(block, "input", {})
-                                await self._log_step(
-                                    {
-                                        "step_type": "tool_call",
-                                        "turn_number": turn_number,
-                                        "data": {
-                                            "name": tool_name,
-                                            "id": getattr(block, "id", "unknown"),
-                                            "input": tool_input,
-                                        },
-                                    }
-                                )
                                 yield ToolEvent(
-                                    tool_name=tool_name,
-                                    tool_input=tool_input,
+                                    tool_name=getattr(block, "name", ""),
+                                    tool_input=getattr(block, "input", {}),
                                 )
                     elif isinstance(message, ResultMessage):
-                        await self._log_step(
-                            {
-                                "step_type": "turn_complete",
-                                "turn_number": turn_number,
-                                "data": {
-                                    "cost_usd": getattr(message, "total_cost_usd", None),
-                                    "usage": getattr(message, "usage", None),
-                                },
-                            }
-                        )
-                        await self._emit_telemetry(message)
+                        await self._log_turn_complete(message, turn_number)
                         if message.result:
                             final_text = message.result
                         yield DoneEvent(final_text=final_text)

@@ -108,7 +108,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):
                 await self.storage.update_task(
                     task_id,
                     state="failed",
-                    new_messages=[error_message],  # type: ignore[arg-type]
+                    new_messages=[error_message],
                 )
                 return
 
@@ -179,7 +179,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):
             )
 
             # Update context with new messages
-            context_data.append(message)  # type: ignore[arg-type]
+            context_data.append(message)
             context_data.append(response_message)
             await self.storage.update_context(context_id, context_data)
 
@@ -188,7 +188,7 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):
                 task_id,
                 state="completed",
                 new_artifacts=artifacts,
-                new_messages=[response_message],  # type: ignore[arg-type]
+                new_messages=[response_message],
             )
 
             logger.info(
@@ -208,17 +208,23 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):
             )
 
             # Return sanitized error message to client
-            error_message = MessageConverter.claude_to_a2a_message(
-                role="assistant",
-                content=f"An error occurred: {type(e).__name__}",
-                task_id=task_id,
-                context_id=context_id,
-            )
-            await self.storage.update_task(
-                task_id,
-                state="failed",
-                new_messages=[error_message],  # type: ignore[arg-type]
-            )
+            try:
+                error_message = MessageConverter.claude_to_a2a_message(
+                    role="assistant",
+                    content=f"An error occurred: {type(e).__name__}",
+                    task_id=task_id,
+                    context_id=context_id,
+                )
+                await self.storage.update_task(
+                    task_id,
+                    state="failed",
+                    new_messages=[error_message],
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to update task to failed state",
+                    extra={"task_id": task_id},
+                )
 
         finally:
             # Remove from running tasks

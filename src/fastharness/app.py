@@ -139,7 +139,7 @@ class FastHarness:
             max_turns=max_turns,
             model=model,
             mcp_servers=mcp_servers or {},
-            setting_sources=setting_sources,
+            setting_sources=setting_sources if setting_sources is not None else ["project"],
         )
         agent = Agent(config=config, func=None)
         self._agents[name] = agent
@@ -201,7 +201,7 @@ class FastHarness:
                 max_turns=max_turns,
                 model=model,
                 mcp_servers=mcp_servers or {},
-                setting_sources=setting_sources,
+                setting_sources=setting_sources if setting_sources is not None else ["project"],
             )
             agent = Agent(config=config, func=func)
             self._agents[name] = agent

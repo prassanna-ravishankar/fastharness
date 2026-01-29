@@ -59,3 +59,8 @@ class ConsoleStepLogger:
                     "tokens": event.data.get("usage"),
                 },
             )
+        else:
+            logger.warning(
+                "Unknown step type",
+                extra={"step_type": event.step_type, "turn": event.turn_number},
+            )

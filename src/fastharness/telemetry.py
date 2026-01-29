@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from fastharness.logging import get_logger
 
@@ -23,7 +23,7 @@ class ExecutionMetrics:
     duration_ms: int
     duration_api_ms: int
     num_turns: int
-    status: str  # "success" or "error"
+    status: Literal["success", "error"]
     timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -53,7 +53,7 @@ class CostTracker(TelemetryCallback):
         """Track cost and emit warnings if thresholds exceeded."""
         self.executions.append(metrics)
 
-        if metrics.total_cost_usd:
+        if metrics.total_cost_usd is not None:
             self.total_cost_usd += metrics.total_cost_usd
 
             if self.total_cost_usd > self.error_threshold_usd:

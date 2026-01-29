@@ -77,8 +77,7 @@ async def tracked_researcher(prompt: str, ctx: AgentContext, client: HarnessClie
     - Logs each step (tool calls, messages, turn completion)
     - Automatically loads CLAUDE.md for project context
     """
-    # Enable step logging
-    client.enable_step_logging = True
+    # Enable step logging (setting a logger activates it)
     client.step_logger = ConsoleStepLogger()
 
     # Add cost tracking
