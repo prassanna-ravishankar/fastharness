@@ -7,8 +7,10 @@ from fastharness.core.context import AgentContext, Message
 from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.core.response import AgentResponse, Artifact
 from fastharness.core.skill import Skill
+from fastharness.step_logger import ConsoleStepLogger, StepEvent, StepLogger
+from fastharness.telemetry import CostTracker, ExecutionMetrics, TelemetryCallback
 
-__version__ = "0.1.0"
+__version__ = "1.0.0"
 
 __all__ = [
     # Main class
@@ -31,4 +33,12 @@ __all__ = [
     "Artifact",
     # Skill
     "Skill",
+    # Telemetry
+    "ExecutionMetrics",
+    "TelemetryCallback",
+    "CostTracker",
+    # Step Logging
+    "StepEvent",
+    "StepLogger",
+    "ConsoleStepLogger",
 ]

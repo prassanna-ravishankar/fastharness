@@ -22,6 +22,9 @@ class AgentConfig:
     max_turns: int | None = None
     model: str = "claude-sonnet-4-20250514"
     custom_tools: list[Any] = field(default_factory=list)
+    mcp_servers: dict[str, Any] = field(default_factory=dict)
+    setting_sources: list[str] | None = field(default_factory=lambda: ["project"])
+    output_format: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         """Validate configuration."""

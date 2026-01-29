@@ -1,6 +1,6 @@
 [project]
 name = "fastharness"
-version = "0.1.0"
+version = "1.0.0"
 description = "Wrap Claude Agent SDK and expose agents as A2A-compliant FastAPI services"
 readme = "README.md"
 authors = [
@@ -8,7 +8,7 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "claude-code-sdk>=0.0.20",
+    "claude-agent-sdk>=0.1.0",
     "fasta2a>=0.1.0",
     "fastapi>=0.115.0",
     "pydantic>=2.0.0",
@@ -21,7 +21,7 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
     "httpx>=0.27.0",
-    "mypy>=1.13.0",
+    "ty",
     "ruff>=0.8.0",
 ]
 
@@ -40,12 +40,5 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 
-[tool.mypy]
-python_version = "3.11"
-strict = true
-warn_return_any = true
-warn_unused_configs = true
-
-[[tool.mypy.overrides]]
-module = ["fasta2a", "fasta2a.*"]
-ignore_missing_imports = true
+[tool.ty.environment]
+python-version = "3.11"

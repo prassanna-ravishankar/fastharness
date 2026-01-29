@@ -65,13 +65,9 @@ class TestClaudeToA2AMessage:
         msg = MessageConverter.claude_to_a2a_message(
             role="assistant",
             content="Hello!",
-            task_id="task-1",
-            context_id="ctx-1",
         )
         assert msg["role"] == "agent"
         assert msg["parts"][0]["text"] == "Hello!"
-        assert msg["task_id"] == "task-1"
-        assert msg["context_id"] == "ctx-1"
 
     def test_user_role(self) -> None:
         msg = MessageConverter.claude_to_a2a_message(

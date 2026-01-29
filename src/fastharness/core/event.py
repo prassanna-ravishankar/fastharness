@@ -27,6 +27,7 @@ class DoneEvent:
     """Completion event signaling end of execution."""
 
     final_text: str | None = None
+    structured_output: Any = None
     type: Literal["done"] = "done"
 
 
