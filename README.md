@@ -161,6 +161,21 @@ client = HarnessClient(
 result = await client.run(prompt)
 ```
 
+Output example:
+```
+[step_logger] Tool call
+    turn: 0
+    tool_name: Read
+    tool_id: call_123
+[step_logger] Assistant message
+    turn: 0
+    text_preview: Found the bug in line 42...
+[step_logger] Turn complete
+    turn: 0
+    cost_usd: 0.01
+    tokens: {'input': 150, 'output': 50}
+```
+
 ## HarnessClient Options
 
 The `HarnessClient` passed to agent functions supports these options:
