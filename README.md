@@ -9,11 +9,19 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Building agents with the Claude SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://github.com/google/A2A) protocol.
+Building agents with the Claude Agent SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol.
 
-The library provides a decorator-based API where you define agent behavior and FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, and managing async task execution. A simple agent requires only a name, description, and list of skills. For complex workflows that need multi-turn reasoning or custom control flow, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
+Define agents with a simple decorator-based API. FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, managing async task execution, and optionally tracking costs and logging intermediate steps. A simple agent requires only a name, description, and list of skills. For complex workflows, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
 
-FastHarness runs standalone or mounts onto existing FastAPI applications, making it suitable for both dedicated agent services and adding agent capabilities to existing APIs. The underlying Claude SDK calls can be routed through LiteLLM, enabling use of alternative model providers without code changes.
+Features include:
+- **Cost tracking** - Monitor API usage with configurable thresholds via `CostTracker`
+- **Step logging** - Capture tool calls, messages, and turn metrics with `ConsoleStepLogger`
+- **CLAUDE.md support** - Automatically load project context and conventions
+- **MCP servers** - Connect external services via Model Context Protocol
+- **FastAPI integration** - Run standalone or mount on existing applications
+- **LiteLLM support** - Route API calls through alternative providers
+
+FastHarness is production-ready and fully A2A protocol compliant.
 
 ## Installation
 
@@ -153,8 +161,6 @@ client = HarnessClient(
 result = await client.run(prompt)
 ```
 
-For migration from v0.x, see [MIGRATION.md](MIGRATION.md).
-
 ## HarnessClient Options
 
 The `HarnessClient` passed to agent functions supports these options:
@@ -166,6 +172,11 @@ The `HarnessClient` passed to agent functions supports these options:
 | `model` | `claude-sonnet-4-20250514` | Claude model to use |
 | `max_turns` | `None` | Maximum conversation turns |
 | `permission_mode` | `bypassPermissions` | Permission handling mode |
+| `mcp_servers` | `{}` | MCP server configurations |
+| `setting_sources` | `["project"]` | Filesystem settings to load (loads CLAUDE.md) |
+| `telemetry_callbacks` | `[]` | Callbacks for execution metrics |
+| `step_logger` | `None` | Logger for intermediate steps |
+| `enable_step_logging` | `False` | Enable step logging if logger provided |
 
 Override per-call:
 ```python
@@ -181,6 +192,47 @@ Running FastHarness exposes these endpoints:
 | `/.well-known/agent-card.json` | Agent metadata and capabilities |
 | `/` | JSON-RPC endpoint (`message/send`, `tasks/get`, etc.) |
 | `/docs` | Interactive documentation |
+
+## Examples
+
+See the `examples/` directory for complete working examples:
+
+- **[simple_agent.py](examples/simple_agent.py)** - Standalone agent service with multi-agent support
+- **[fastapi_integration.py](examples/fastapi_integration.py)** - Mounting FastHarness on existing FastAPI app
+
+Run examples:
+```bash
+# Standalone agent
+uv run uvicorn examples.simple_agent:app --port 8000
+
+# FastAPI integration
+uv run uvicorn examples.fastapi_integration:app --port 8000
+```
+
+Test with:
+```bash
+# Get agent card
+curl http://localhost:8000/.well-known/agent-card.json
+
+# Send message (A2A JSON-RPC)
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "params": {
+      "id": "task-001",
+      "contextId": "ctx-001",
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Hello"}],
+        "kind": "message",
+        "messageId": "msg-001"
+      }
+    },
+    "id": 1
+  }'
+```
 
 ## LiteLLM Support
 
