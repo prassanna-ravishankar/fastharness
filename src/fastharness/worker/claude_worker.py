@@ -36,7 +36,7 @@ class AgentRegistry:
 
 
 @dataclass
-class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
+class ClaudeWorker(Worker[list[Message]]):
     """Worker implementation that executes tasks using Claude SDK.
 
     Bridges the A2A protocol with the Claude Agent SDK.
@@ -102,8 +102,6 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
                 error_message = MessageConverter.claude_to_a2a_message(
                     role="assistant",
                     content=f"Error: {error_msg}",
-                    task_id=task_id,
-                    context_id=context_id,
                 )
                 await self.storage.update_task(
                     task_id,
@@ -175,8 +173,6 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
             response_message = MessageConverter.claude_to_a2a_message(
                 role="assistant",
                 content=result if isinstance(result, str) else str(result),
-                task_id=task_id,
-                context_id=context_id,
             )
 
             # Update context with new messages
@@ -213,8 +209,6 @@ class ClaudeWorker(Worker[list[dict[str, Any]]]):  # type: ignore[misc]
                 error_message = MessageConverter.claude_to_a2a_message(
                     role="assistant",
                     content=f"An error occurred: {type(e).__name__}",
-                    task_id=task_id,
-                    context_id=context_id,
                 )
                 await self.storage.update_task(
                     task_id,

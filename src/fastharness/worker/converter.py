@@ -58,28 +58,21 @@ class MessageConverter:
     def claude_to_a2a_message(
         role: str,
         content: list[Any] | str,
-        task_id: str | None = None,
-        context_id: str | None = None,
-    ) -> dict[str, Any]:
-        """Convert a Claude SDK message to A2A Message dict."""
+    ) -> Message:
+        """Convert a Claude SDK message to A2A Message."""
         if isinstance(content, str):
-            parts = [TextPart(kind="text", text=content)]
+            parts: list[Part] = [TextPart(kind="text", text=content)]
         else:
             parts = MessageConverter.claude_to_a2a_parts(content)
 
         a2a_role: Any = "agent" if role == "assistant" else "user"
-        msg_dict: dict[str, Any] = {
+        msg: Message = {
             "role": a2a_role,
             "parts": parts,
             "kind": "message",
             "message_id": str(uuid.uuid4()),
         }
-        if task_id:
-            msg_dict["task_id"] = task_id
-        if context_id:
-            msg_dict["context_id"] = context_id
-
-        return msg_dict
+        return msg
 
     @staticmethod
     def a2a_to_claude_messages(history: list[Message]) -> list[dict[str, Any]]:

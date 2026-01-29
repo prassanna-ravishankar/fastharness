@@ -18,7 +18,7 @@ uv run pytest tests/test_basic.py::TestSkill  # Single test class
 uv run pytest -k "test_agent"                  # Pattern match
 
 # Type check
-uv run mypy src/
+uv run ty check src/
 
 # Lint
 uv run ruff check src/
