@@ -151,9 +151,7 @@ class TestAgent:
             skills=[Skill(id="s1", name="S1", description="Skill 1")],
         )
 
-        async def my_func(
-            prompt: str, ctx: AgentContext, client: HarnessClient
-        ) -> str:
+        async def my_func(prompt: str, ctx: AgentContext, client: HarnessClient) -> str:
             return "result"
 
         agent = Agent(config=config, func=my_func)
@@ -209,9 +207,7 @@ class TestFastHarness:
             description="A custom agent",
             skills=[Skill(id="custom", name="Custom", description="Custom skill")],
         )
-        async def custom_agent(
-            prompt: str, ctx: AgentContext, client: HarnessClient
-        ) -> str:
+        async def custom_agent(prompt: str, ctx: AgentContext, client: HarnessClient) -> str:
             return await client.run(prompt)
 
         assert isinstance(custom_agent, Agent)

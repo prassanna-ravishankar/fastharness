@@ -1,8 +1,7 @@
-"""Advanced features example: telemetry, step logging, and MCP servers.
+"""Advanced features example: tracing, MCP servers.
 
 Demonstrates:
-- Cost tracking with CostTracker
-- Step logging with ConsoleStepLogger
+- OpenTelemetry tracing with GenAI semantic conventions
 - MCP server configuration
 - Custom agent loops
 
@@ -13,29 +12,37 @@ import logging
 
 from fastharness import (
     AgentContext,
-    ConsoleStepLogger,
-    CostTracker,
     FastHarness,
     HarnessClient,
     Skill,
 )
 
-# Configure logging so fastharness telemetry/step output is visible
+# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
+
+# Optional: set up OTel console exporter for development
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
+
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+    trace.set_tracer_provider(provider)
+except ImportError:
+    pass  # OTel not installed, tracing will be a no-op
 
 harness = FastHarness(
     name="advanced-features",
-    description="Showcase cost tracking, step logging, and MCP servers",
+    description="Showcase tracing and MCP servers",
     version="1.0.0",
+    tracing=True,
 )
 
-# Initialize cost tracker
-cost_tracker = CostTracker(warn_threshold_usd=0.5, error_threshold_usd=5.0)
-
-# Simple agent - config only (no logging by default)
+# Simple agent - inherits tracing=True from harness
 harness.agent(
     name="simple-assistant",
-    description="Basic assistant without instrumentation",
+    description="Basic assistant with tracing",
     skills=[
         Skill(
             id="assist",
@@ -45,51 +52,36 @@ harness.agent(
     ],
     system_prompt="You are a helpful assistant. Provide concise responses.",
     tools=["Read", "Grep"],
-    setting_sources=["project"],  # Load CLAUDE.md if it exists
+    setting_sources=["project"],
 )
 
 
-# Custom loop with cost tracking and step logging
+# Custom loop with tracing
 @harness.agentloop(
     name="tracked-researcher",
-    description="Researcher with cost tracking and detailed logging",
+    description="Researcher with OTel tracing",
     skills=[
         Skill(
             id="research",
             name="Research",
-            description="Conduct research with full telemetry",
-            tags=["research", "tracking"],
+            description="Conduct research with tracing",
+            tags=["research", "tracing"],
         )
     ],
     system_prompt="You are a research assistant. Be thorough and structured.",
     tools=["Read", "WebSearch", "Glob"],
 )
 async def tracked_researcher(prompt: str, ctx: AgentContext, client: HarnessClient) -> str:
-    """Research agent with cost tracking and step logging.
+    """Research agent with OTel tracing.
 
-    When this agent runs, you'll see output like:
-    [step_logger] Tool call: Read file.py
-    [step_logger] Assistant message: Found bug...
-    [step_logger] Turn complete: cost=$0.01, tokens=150
-
-    Features:
-    - Tracks API costs via telemetry callbacks
-    - Logs each step (tool calls, messages, turn completion)
-    - Automatically loads CLAUDE.md for project context
+    Each client.run() call creates a chat span with tool spans nested inside.
+    The outer invoke_agent span wraps the entire execution.
     """
-    # Enable step logging (setting a logger activates it)
-    client.step_logger = ConsoleStepLogger()
-
-    # Add cost tracking
-    client.telemetry_callbacks.append(cost_tracker)
-
-    # Run research with full instrumentation
     result = await client.run(prompt)
-
     return result
 
 
-# Custom loop with MCP servers (example config, won't run without actual MCP server)
+# Custom loop with MCP servers (example config)
 @harness.agentloop(
     name="mcp-agent",
     description="Agent with MCP server integration",
@@ -101,23 +93,11 @@ async def tracked_researcher(prompt: str, ctx: AgentContext, client: HarnessClie
         )
     ],
     system_prompt="You are an agent with extended capabilities via MCP servers.",
-    mcp_servers={
-        # Example MCP server configuration
-        # Uncomment and configure to use actual MCP servers
-        # "example-server": {
-        #     "command": "python",
-        #     "args": ["-m", "mcp_server_example"],
-        # }
-    },
-    tools=["Read", "Glob"],  # Add "mcp__example-server__*" if MCP server is enabled
+    mcp_servers={},
+    tools=["Read", "Glob"],
 )
 async def mcp_agent(prompt: str, ctx: AgentContext, client: HarnessClient) -> str:
-    """Agent with MCP server support.
-
-    MCP servers extend agent capabilities by connecting external services.
-    Configure mcp_servers in the decorator to add custom tools.
-    """
-    client.telemetry_callbacks.append(cost_tracker)
+    """Agent with MCP server support."""
     result = await client.run(prompt)
     return result
 
@@ -131,7 +111,7 @@ if __name__ == "__main__":
 
     print("FastHarness Advanced Features Example")
     print("=" * 50)
-    print("Agents with telemetry and step logging enabled")
+    print("Agents with OTel tracing enabled")
     print("Starting server on http://localhost:8000")
     print("\nTest with:")
     print("  curl http://localhost:8000/.well-known/agent-card.json")

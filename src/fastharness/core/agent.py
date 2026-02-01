@@ -25,6 +25,7 @@ class AgentConfig:
     mcp_servers: dict[str, Any] = field(default_factory=dict)
     setting_sources: list[str] | None = field(default_factory=lambda: ["project"])
     output_format: dict[str, Any] | None = None
+    tracing: bool = False
 
     def __post_init__(self) -> None:
         """Validate configuration."""

@@ -11,11 +11,10 @@
 
 Building agents with the Claude Agent SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol.
 
-Define agents with a simple decorator-based API. FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, managing async task execution, and optionally tracking costs and logging intermediate steps. A simple agent requires only a name, description, and list of skills. For complex workflows, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
+Define agents with a simple decorator-based API. FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, and managing async task execution. A simple agent requires only a name, description, and list of skills. For complex workflows, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
 
 Features include:
-- **Cost tracking** - Monitor API usage with configurable thresholds via `CostTracker`
-- **Step logging** - Capture tool calls, messages, and turn metrics with `ConsoleStepLogger`
+- **Tracing** - OpenTelemetry GenAI semantic conventions for multi-turn agent tracing (optional)
 - **CLAUDE.md support** - Automatically load project context and conventions
 - **MCP servers** - Connect external services via Model Context Protocol
 - **FastAPI integration** - Run standalone or mount on existing applications
@@ -130,50 +129,150 @@ harness.agent(
 )
 ```
 
-### Cost Tracking
+### Tracing
 
-Monitor API costs with configurable thresholds:
+FastHarness supports [OpenTelemetry GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/)
+for distributed tracing and metrics. Install the optional dependency and enable tracing:
+
+```bash
+uv add fastharness[otel]
+```
 
 ```python
-from fastharness import CostTracker
-
-tracker = CostTracker(warn_threshold_usd=1.0)
-
-@harness.agentloop(...)
-async def agent(prompt, ctx, client):
-    client.telemetry_callbacks.append(tracker)
-    result = await client.run(prompt)
-    print(f"Cost: ${tracker.total_cost_usd:.4f}")
-    return result
+harness = FastHarness(name="my-agent", tracing=True)
+harness.agent(name="assistant", description="...", skills=[...])
+app = harness.app
 ```
 
-### Step Logging
+Configure your OTel pipeline separately (standard OTel setup):
 
-Log intermediate steps for debugging:
+<details>
+<summary>Console exporter (development)</summary>
 
 ```python
-from fastharness import ConsoleStepLogger
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import ConsoleSpanExporter, SimpleSpanProcessor
 
-client = HarnessClient(
-    step_logger=ConsoleStepLogger(),
-)
-result = await client.run(prompt)
+provider = TracerProvider()
+provider.add_span_processor(SimpleSpanProcessor(ConsoleSpanExporter()))
+trace.set_tracer_provider(provider)
+
+harness = FastHarness(name="my-agent", tracing=True)
+harness.agent(name="assistant", description="...", skills=[...])
+app = harness.app
 ```
 
-Output example:
+</details>
+
+<details>
+<summary>OTLP exporter (production)</summary>
+
+```bash
+uv add opentelemetry-exporter-otlp opentelemetry-sdk
+export OTEL_SERVICE_NAME=my-agent
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317
 ```
-[step_logger] Tool call
-    turn: 0
-    tool_name: Read
-    tool_id: call_123
-[step_logger] Assistant message
-    turn: 0
-    text_preview: Found the bug in line 42...
-[step_logger] Turn complete
-    turn: 0
-    cost_usd: 0.01
-    tokens: {'input': 150, 'output': 50}
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+trace.set_tracer_provider(provider)
+
+harness = FastHarness(name="my-agent", tracing=True)
+harness.agent(name="assistant", description="...", skills=[...])
+app = harness.app
 ```
+
+Or use auto-instrumentation:
+```bash
+opentelemetry-instrument uvicorn mymodule:app --port 8000
+```
+
+</details>
+
+<details>
+<summary>Jaeger (local debugging)</summary>
+
+```bash
+docker run -d --name jaeger -p 16686:16686 -p 4317:4317 jaegertracing/all-in-one:latest
+```
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
+
+provider = TracerProvider()
+provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:4317")))
+trace.set_tracer_provider(provider)
+
+harness = FastHarness(name="my-agent", tracing=True)
+harness.agent(name="assistant", description="...", skills=[...])
+app = harness.app
+# View traces at http://localhost:16686
+```
+
+</details>
+
+<details>
+<summary>Span hierarchy</summary>
+
+A multi-turn agent execution with tool use:
+
+```
+invoke_agent assistant                    (850ms)
+  └── chat claude-sonnet-4-20250514       (845ms)
+        ├── execute_tool Read             (toolu_abc)
+        ├── execute_tool Grep             (toolu_def)
+        └── execute_tool Write            (toolu_ghi)
+```
+
+</details>
+
+<details>
+<summary>Multi-step agentloop</summary>
+
+Custom agent loops that call `client.run()` multiple times get separate chat spans:
+
+```python
+@harness.agentloop(name="researcher", ..., tracing=True)
+async def researcher(prompt, ctx, client):
+    draft = await client.run(prompt)            # → chat span 1
+    review = await client.run(f"Review: {draft}")  # → chat span 2
+    return review
+```
+
+```
+invoke_agent researcher                   (2400ms)
+  ├── chat claude-sonnet-4-...            (1800ms)
+  │     ├── execute_tool Read
+  │     └── execute_tool Grep
+  └── chat claude-sonnet-4-...            (600ms)
+```
+
+</details>
+
+<details>
+<summary>Per-agent tracing</summary>
+
+```python
+harness = FastHarness(name="my-service", tracing=True)
+
+# Inherits tracing=True from harness
+harness.agent(name="traced-agent", description="...", skills=[...])
+
+# Explicitly disable for this agent
+harness.agent(name="silent-agent", description="...", skills=[...], tracing=False)
+```
+
+</details>
 
 ## HarnessClient Options
 
@@ -188,9 +287,8 @@ The `HarnessClient` passed to agent functions supports these options:
 | `permission_mode` | `bypassPermissions` | Permission handling mode |
 | `mcp_servers` | `{}` | MCP server configurations |
 | `setting_sources` | `["project"]` | Filesystem settings to load (loads CLAUDE.md) |
-| `telemetry_callbacks` | `[]` | Callbacks for execution metrics |
-| `step_logger` | `None` | Logger for intermediate steps |
 | `output_format` | `None` | JSON schema for structured output (e.g., `{"type": "json_schema", "schema": {...}}`) |
+| `tracing` | `False` | Enable OpenTelemetry tracing |
 
 Override per-call:
 ```python

@@ -1,5 +1,6 @@
 """ClaudeWorker - Claude SDK integration with fasta2a Worker."""
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -10,12 +11,18 @@ from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
 from fastharness.logging import get_logger
+from fastharness.tracing import agent_span
 from fastharness.worker.converter import MessageConverter
 
 if TYPE_CHECKING:
     from fastharness.core.agent import Agent
 
 logger = get_logger("worker")
+
+
+@contextmanager
+def _nullcontext():
+    yield None
 
 
 @dataclass
@@ -148,23 +155,24 @@ class ClaudeWorker(Worker[list[Message]]):
                 mcp_servers=config.mcp_servers,
                 setting_sources=config.setting_sources,
                 output_format=config.output_format,
+                tracing=config.tracing,
             )
 
-            # Execute agent
-            if agent.func is not None:
-                # Custom agent loop
-                logger.debug(
-                    "Executing custom agent function",
-                    extra={"task_id": task_id, "agent_name": agent.config.name},
-                )
-                result = await agent.func(prompt, ctx, client)
-            else:
-                # Default behavior: simple run
-                logger.debug(
-                    "Executing default agent run",
-                    extra={"task_id": task_id, "agent_name": agent.config.name},
-                )
-                result = await client.run(prompt)
+            # Execute agent (optionally wrapped in OTel agent span)
+            span_ctx = agent_span(config.name, config.model) if config.tracing else _nullcontext()
+            with span_ctx:
+                if agent.func is not None:
+                    logger.debug(
+                        "Executing custom agent function",
+                        extra={"task_id": task_id, "agent_name": agent.config.name},
+                    )
+                    result = await agent.func(prompt, ctx, client)
+                else:
+                    logger.debug(
+                        "Executing default agent run",
+                        extra={"task_id": task_id, "agent_name": agent.config.name},
+                    )
+                    result = await client.run(prompt)
 
             # Convert result to artifacts
             artifacts = self.build_artifacts(result)

@@ -36,7 +36,6 @@ class TestHarnessClientConfig:
         assert client.cwd == "/tmp"
         assert client.permission_mode == "default"
 
-
     def test_default_output_format(self) -> None:
         client = HarnessClient()
         assert client.output_format is None

@@ -58,6 +58,7 @@ class FastHarness:
         url: str = "http://localhost:8000",
         storage: Storage[Any] | None = None,
         broker: Broker | None = None,
+        tracing: bool = False,
     ):
         """Initialize FastHarness.
 
@@ -68,11 +69,13 @@ class FastHarness:
             url: URL where the agent is hosted.
             storage: Storage implementation (defaults to InMemoryStorage).
             broker: Broker implementation (defaults to InMemoryBroker).
+            tracing: Enable OpenTelemetry tracing for all agents (default False).
         """
         self.name = name
         self.description = description
         self.version = version
         self.url = url
+        self.tracing = tracing
 
         self._storage = storage or InMemoryStorage()
         self._broker = broker or InMemoryBroker()
@@ -112,6 +115,7 @@ class FastHarness:
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
         output_format: dict[str, Any] | None = None,
+        tracing: bool | None = None,
     ) -> Agent:
         """Register a simple agent (config-only, no custom loop).
 
@@ -129,6 +133,7 @@ class FastHarness:
             setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
             output_format: JSON schema for structured output
                 (e.g., {"type": "json_schema", "schema": {...}}).
+            tracing: Enable OTel tracing for this agent (None inherits from harness).
 
         Returns:
             The registered Agent.
@@ -144,6 +149,7 @@ class FastHarness:
             mcp_servers=mcp_servers or {},
             setting_sources=setting_sources if setting_sources is not None else ["project"],
             output_format=output_format,
+            tracing=tracing if tracing is not None else self.tracing,
         )
         agent = Agent(config=config, func=None)
         self._agents[name] = agent
@@ -166,6 +172,7 @@ class FastHarness:
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
         output_format: dict[str, Any] | None = None,
+        tracing: bool | None = None,
     ) -> Callable[[AgentFunc], Agent]:
         """Decorator to register an agent with custom loop logic.
 
@@ -183,6 +190,7 @@ class FastHarness:
             setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
             output_format: JSON schema for structured output
                 (e.g., {"type": "json_schema", "schema": {...}}).
+            tracing: Enable OTel tracing for this agent (None inherits from harness).
 
         Returns:
             Decorator that registers the agent function.
@@ -210,6 +218,7 @@ class FastHarness:
                 mcp_servers=mcp_servers or {},
                 setting_sources=setting_sources if setting_sources is not None else ["project"],
                 output_format=output_format,
+                tracing=tracing if tracing is not None else self.tracing,
             )
             agent = Agent(config=config, func=func)
             self._agents[name] = agent
