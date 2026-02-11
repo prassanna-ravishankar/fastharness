@@ -252,10 +252,10 @@ class TestMessageConverter:
 
     def test_text_to_artifact(self) -> None:
         artifact = MessageConverter.text_to_artifact("Result text", name="output")
-        assert artifact["name"] == "output"
-        assert len(artifact["parts"]) == 1
-        assert artifact["parts"][0]["kind"] == "text"
-        assert artifact["parts"][0]["text"] == "Result text"
+        assert artifact.name == "output"
+        assert len(artifact.parts) == 1
+        assert artifact.parts[0].root.kind == "text"
+        assert artifact.parts[0].root.text == "Result text"
 
 
 class TestHarnessClient:

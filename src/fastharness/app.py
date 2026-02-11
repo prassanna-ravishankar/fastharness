@@ -1,20 +1,23 @@
 """FastHarness - Wrap Claude Agent SDK and expose agents as A2A services."""
 
+import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
-from fasta2a import Broker, FastA2A, Storage
-from fasta2a.broker import InMemoryBroker
-from fasta2a.schema import Skill as A2ASkill
-from fasta2a.storage import InMemoryStorage
+from a2a.server.apps.jsonrpc.fastapi_app import A2AFastAPIApplication
+from a2a.server.request_handlers.default_request_handler import DefaultRequestHandler
+from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
+from a2a.server.tasks.task_store import TaskStore
+from a2a.types import AgentCapabilities, AgentCard
+from a2a.types import AgentSkill as A2ASkill
 
 from fastharness.client import HarnessClient
 from fastharness.core.agent import Agent, AgentConfig
 from fastharness.core.context import AgentContext
 from fastharness.core.skill import Skill
 from fastharness.logging import get_logger
-from fastharness.worker.claude_worker import AgentRegistry, ClaudeWorker
+from fastharness.worker.claude_executor import AgentRegistry, ClaudeAgentExecutor
 
 logger = get_logger("app")
 
@@ -26,7 +29,7 @@ class FastHarness:
     """Main class for creating A2A-compliant Claude agents.
 
     FastHarness wraps the Claude Agent SDK and exposes agents as A2A services
-    using FastAPI and fasta2a.
+    using FastAPI and the native A2A Python SDK.
 
     Example:
         ```python
@@ -56,8 +59,9 @@ class FastHarness:
         description: str = "Claude-powered A2A agent",
         version: str = "1.0.0",
         url: str = "http://localhost:8000",
-        storage: Storage[Any] | None = None,
-        broker: Broker | None = None,
+        storage: Any | None = None,
+        broker: Any | None = None,
+        task_store: TaskStore | None = None,
     ):
         """Initialize FastHarness.
 
@@ -66,18 +70,33 @@ class FastHarness:
             description: Description for the A2A agent card.
             version: Version for the A2A agent card.
             url: URL where the agent is hosted.
-            storage: Storage implementation (defaults to InMemoryStorage).
-            broker: Broker implementation (defaults to InMemoryBroker).
+            storage: DEPRECATED. Use task_store instead.
+            broker: DEPRECATED. No longer used with native A2A SDK.
+            task_store: TaskStore implementation (defaults to InMemoryTaskStore).
         """
         self.name = name
         self.description = description
         self.version = version
         self.url = url
 
-        self._storage = storage or InMemoryStorage()
-        self._broker = broker or InMemoryBroker()
+        # Handle deprecated parameters
+        if storage is not None:
+            warnings.warn(
+                "The 'storage' parameter is deprecated and will be removed in a future version. "
+                "Use 'task_store' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        if broker is not None:
+            warnings.warn(
+                "The 'broker' parameter is deprecated and no longer used with native A2A SDK.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        self._task_store = task_store or InMemoryTaskStore()
         self._agents: dict[str, Agent] = {}
-        self._app: FastA2A | None = None
+        self._app: Any = None
 
     def _convert_skills(self, skills: list[Skill]) -> list[A2ASkill]:
         """Convert FastHarness Skills to A2A Skills."""
@@ -99,6 +118,49 @@ class FastHarness:
         for agent in self._agents.values():
             all_skills.extend(self._convert_skills(agent.config.skills))
         return all_skills
+
+    def _register_agent(
+        self,
+        name: str,
+        description: str,
+        skills: list[Skill],
+        func: AgentFunc | None = None,
+        system_prompt: str | None = None,
+        tools: list[str] | None = None,
+        max_turns: int | None = None,
+        model: str = "claude-sonnet-4-20250514",
+        mcp_servers: dict[str, Any] | None = None,
+        setting_sources: list[str] | None = None,
+        output_format: dict[str, Any] | None = None,
+    ) -> Agent:
+        """Build AgentConfig, create Agent, and register it.
+
+        Shared implementation for both agent() and agentloop().
+        """
+        config = AgentConfig(
+            name=name,
+            description=description,
+            skills=skills,
+            system_prompt=system_prompt,
+            tools=tools or [],
+            max_turns=max_turns,
+            model=model,
+            mcp_servers=mcp_servers or {},
+            setting_sources=setting_sources if setting_sources is not None else ["project"],
+            output_format=output_format,
+        )
+        agent = Agent(config=config, func=func)
+        self._agents[name] = agent
+        self._app = None  # Invalidate cached app
+        logger.info(
+            "Registered agent",
+            extra={
+                "agent_name": name,
+                "skill_count": len(skills),
+                "has_custom_loop": func is not None,
+            },
+        )
+        return agent
 
     def agent(
         self,
@@ -133,26 +195,18 @@ class FastHarness:
         Returns:
             The registered Agent.
         """
-        config = AgentConfig(
+        return self._register_agent(
             name=name,
             description=description,
             skills=skills,
             system_prompt=system_prompt,
-            tools=tools or [],
+            tools=tools,
             max_turns=max_turns,
             model=model,
-            mcp_servers=mcp_servers or {},
-            setting_sources=setting_sources if setting_sources is not None else ["project"],
+            mcp_servers=mcp_servers,
+            setting_sources=setting_sources,
             output_format=output_format,
         )
-        agent = Agent(config=config, func=None)
-        self._agents[name] = agent
-        self._app = None  # Invalidate cached app
-        logger.info(
-            "Registered agent",
-            extra={"agent_name": name, "skill_count": len(skills)},
-        )
-        return agent
 
     def agentloop(
         self,
@@ -199,57 +253,58 @@ class FastHarness:
         """
 
         def decorator(func: AgentFunc) -> Agent:
-            config = AgentConfig(
+            return self._register_agent(
                 name=name,
                 description=description,
                 skills=skills,
+                func=func,
                 system_prompt=system_prompt,
-                tools=tools or [],
+                tools=tools,
                 max_turns=max_turns,
                 model=model,
-                mcp_servers=mcp_servers or {},
-                setting_sources=setting_sources if setting_sources is not None else ["project"],
+                mcp_servers=mcp_servers,
+                setting_sources=setting_sources,
                 output_format=output_format,
             )
-            agent = Agent(config=config, func=func)
-            self._agents[name] = agent
-            self._app = None  # Invalidate cached app
-            logger.info(
-                "Registered agent with custom loop",
-                extra={"agent_name": name, "skill_count": len(skills)},
-            )
-            return agent
 
         return decorator
 
-    def _create_app(self) -> FastA2A:
-        """Create the FastA2A application."""
+    def _create_app(self) -> Any:
+        """Create the FastAPI application with native A2A SDK."""
         registry = AgentRegistry(agents=self._agents)
 
-        # Create worker
-        worker = ClaudeWorker(
-            broker=self._broker,
-            storage=self._storage,
-            agent_registry=registry,
-        )
-
-        @asynccontextmanager
-        async def lifespan(app: FastA2A) -> AsyncIterator[None]:
-            async with self._broker:
-                async with worker.run():
-                    async with app.task_manager:
-                        yield
-
-        return FastA2A(
-            storage=self._storage,
-            broker=self._broker,
+        # Create AgentCard
+        agent_card = AgentCard(
             name=self.name,
             description=self.description,
             version=self.version,
             url=self.url,
             skills=self._collect_all_skills(),
-            lifespan=lifespan,
+            capabilities=AgentCapabilities(),  # Default capabilities
+            default_input_modes=["text"],  # Default to text input
+            default_output_modes=["text"],  # Default to text output
         )
+
+        # Create ClaudeAgentExecutor
+        executor = ClaudeAgentExecutor(
+            agent_registry=registry,
+            task_store=self._task_store,
+        )
+
+        # Create DefaultRequestHandler (handles all JSON-RPC methods)
+        handler = DefaultRequestHandler(
+            agent_executor=executor,
+            task_store=self._task_store,
+            queue_manager=None,  # Use SDK default (InMemoryQueueManager)
+        )
+
+        # Build FastAPI app with A2A endpoints
+        a2a_app = A2AFastAPIApplication(
+            agent_card=agent_card,
+            http_handler=handler,
+        )
+
+        return a2a_app.build()
 
     @asynccontextmanager
     async def lifespan_context(self) -> AsyncIterator[None]:
@@ -270,22 +325,14 @@ class FastHarness:
             ```
         """
         # Ensure app is created
-        fasta2a_app = self.app
+        _ = self.app
 
-        registry = AgentRegistry(agents=self._agents)
-        worker = ClaudeWorker(
-            broker=self._broker,
-            storage=self._storage,
-            agent_registry=registry,
-        )
-
-        async with self._broker:
-            async with worker.run():
-                async with fasta2a_app.task_manager:
-                    yield
+        # Native SDK manages lifecycle internally
+        # Task store doesn't require explicit lifecycle management
+        yield
 
     @property
-    def app(self) -> FastA2A:
+    def app(self) -> Any:
         """Return FastAPI-compatible app with A2A endpoints.
 
         The app can be:
@@ -293,7 +340,7 @@ class FastHarness:
         - Mounted on another FastAPI app: `fastapi_app.mount("/agents", harness.app)`
 
         Returns:
-            FastA2A application (Starlette-based, FastAPI-compatible).
+            FastAPI application with native A2A SDK integration.
         """
         if self._app is None:
             self._app = self._create_app()
