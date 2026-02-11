@@ -3,7 +3,7 @@
 import uuid
 from typing import Any
 
-from a2a.types import Artifact, DataPart, Message, Part, TextPart
+from a2a.types import Artifact, DataPart, Message, Part, Role, TextPart
 
 
 def _normalize_part(part: Any) -> dict[str, Any]:
@@ -87,7 +87,7 @@ class MessageConverter:
         else:
             parts = MessageConverter.claude_to_a2a_parts(content)
 
-        a2a_role: Any = "agent" if role == "assistant" else "user"
+        a2a_role = Role.agent if role == "assistant" else Role.user
         return Message(
             role=a2a_role,
             parts=parts,
