@@ -9,7 +9,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Building agents with the Claude Agent SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol.
+Building agents with the Claude Agent SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol using the native A2A Python SDK.
 
 Define agents with a simple decorator-based API. FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, managing async task execution, and optionally tracking costs and logging intermediate steps. A simple agent requires only a name, description, and list of skills. For complex workflows, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
 
