@@ -31,9 +31,9 @@ def _ensure_history(task: Task) -> list[Message]:
 
 def _get_user_id(context: RequestContext) -> str:
     """Extract authenticated user ID from request context."""
-    if context.call_context and context.call_context.user:
-        if context.call_context.user.is_authenticated:
-            return context.call_context.user.user_name
+    user = context.call_context.user if context.call_context else None
+    if user and user.is_authenticated:
+        return user.user_name
     return "anonymous"
 
 
@@ -52,11 +52,8 @@ def _authorize_task_access(task: Task, context: RequestContext) -> bool:
 
 def _extract_requested_skill(context: RequestContext) -> str | None:
     """Extract requested skill ID from request context."""
-    metadata = context.metadata
-    if metadata:
-        skill_id = metadata.get("skill_id")
-        if skill_id:
-            return skill_id
+    if context.metadata:
+        return context.metadata.get("skill_id") or None
     return None
 
 
@@ -81,15 +78,25 @@ class AgentRegistry:
     def get_by_skill(self, skill_id: str) -> "Agent | None":
         """Get agent that provides the given skill."""
         agent_name = self._skill_to_agent.get(skill_id)
-        if agent_name:
-            return self.agents.get(agent_name)
-        return None
+        return self.agents.get(agent_name) if agent_name else None
 
     def get_default(self) -> "Agent | None":
         """Get the default (first registered) agent."""
         if self.agents:
             return next(iter(self.agents.values()))
         return None
+
+    def resolve(self, skill_id: str | None = None) -> "Agent | None":
+        """Resolve an agent by skill ID, falling back to the default agent."""
+        if skill_id:
+            agent = self.get_by_skill(skill_id)
+            if agent:
+                return agent
+            logger.warning(
+                "Requested skill not found, falling back to default agent",
+                extra={"skill_id": skill_id},
+            )
+        return self.get_default()
 
 
 @dataclass
@@ -223,29 +230,9 @@ class ClaudeAgentExecutor(AgentExecutor):
                 await self.task_store.save(current_task)
                 context.current_task = current_task
 
-            # Get agent - prefer by skill, fall back to default
+            # Resolve agent by requested skill, falling back to default
             requested_skill = _extract_requested_skill(context)
-            agent = None
-
-            if requested_skill:
-                agent = self.agent_registry.get_by_skill(requested_skill)
-                if agent:
-                    logger.debug(
-                        "Selected agent by skill",
-                        extra={
-                            "task_id": task_id,
-                            "skill_id": requested_skill,
-                            "agent_name": agent.config.name,
-                        },
-                    )
-                else:
-                    logger.warning(
-                        "Requested skill not found, using default agent",
-                        extra={"task_id": task_id, "skill_id": requested_skill},
-                    )
-
-            if agent is None:
-                agent = self.agent_registry.get_default()
+            agent = self.agent_registry.resolve(requested_skill)
 
             if agent is None:
                 logger.error("Task failed: no agents registered", extra={"task_id": task_id})
@@ -373,34 +360,31 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Check authorization
         current_task = context.current_task
-        if current_task:
-            if not _authorize_task_access(current_task, context):
-                logger.warning(
-                    "Unauthorized cancel attempt",
-                    extra={"task_id": task_id, "user": _get_user_id(context)},
-                )
-                return
+        if current_task and not _authorize_task_access(current_task, context):
+            logger.warning(
+                "Unauthorized cancel attempt",
+                extra={"task_id": task_id, "user": _get_user_id(context)},
+            )
+            return
 
-        # Actually cancel the running task
+        # Cancel the running asyncio task
         running_task = self._running_tasks.get(task_id)
         if running_task and not running_task.done():
-            logger.debug("Cancelling asyncio task", extra={"task_id": task_id})
             running_task.cancel()
-
-            # Wait briefly for cancellation
             try:
-                await asyncio.wait_for(asyncio.shield(running_task), timeout=0.5)
-            except (TimeoutError, asyncio.CancelledError):
+                await running_task
+            except asyncio.CancelledError:
                 pass
 
         # Update task status
-        if current_task:
-            current_task.status = TaskStatus(state=TaskState.canceled)
-            await self.task_store.save(current_task)
+        if not current_task:
+            return
 
-            # Enqueue cancellation message
-            cancel_message = MessageConverter.claude_to_a2a_message(
-                role="assistant",
-                content="Task cancelled by user request.",
-            )
-            await event_queue.enqueue_event(cancel_message)
+        current_task.status = TaskStatus(state=TaskState.canceled)
+        await self.task_store.save(current_task)
+
+        cancel_message = MessageConverter.claude_to_a2a_message(
+            role="assistant",
+            content="Task cancelled by user request.",
+        )
+        await event_queue.enqueue_event(cancel_message)
