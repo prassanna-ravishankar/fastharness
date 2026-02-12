@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FastHarness wraps the Claude Agent SDK and exposes agents as A2A (Agent-to-Agent) protocol compliant services. It bridges Claude Agent SDK with Google's A2A protocol via the fasta2a library.
+FastHarness wraps the Claude Agent SDK and exposes agents as A2A (Agent-to-Agent) protocol compliant services. It bridges Claude Agent SDK with Google's A2A protocol using the native A2A Python SDK.
 
 ## Commands
 
@@ -33,20 +33,20 @@ FastHarness (app.py)
     ├── Decorators: .agent() and .agentloop()
     │   └── Register agents with skills, tools, system prompts
     │
-    ├── FastA2A (from fasta2a)
+    ├── A2AFastAPIApplication (native A2A SDK)
     │   └── Exposes A2A endpoints: /.well-known/agent-card.json, JSON-RPC /
     │
-    └── ClaudeWorker (worker/claude_worker.py)
+    └── ClaudeAgentExecutor (worker/claude_executor.py)
         └── Executes tasks using HarnessClient → Claude Agent SDK
 ```
 
-**Flow**: A2A request → FastA2A → Broker → ClaudeWorker → HarnessClient → Claude Agent SDK → MessageConverter → A2A response
+**Flow**: A2A request → DefaultRequestHandler → ClaudeAgentExecutor → HarnessClient → Claude Agent SDK → MessageConverter → A2A response
 
 ### Key Components
 
-- **FastHarness** (`app.py`): Main entry point. Registers agents, creates FastA2A app with lifespan management.
+- **FastHarness** (`app.py`): Main entry point. Registers agents, creates A2AFastAPIApplication with native SDK integration.
 - **HarnessClient** (`client.py`): Wraps ClaudeSDKClient. Provides `run()` for full execution and `stream()` for event-based iteration.
-- **ClaudeWorker** (`worker/claude_worker.py`): Implements fasta2a Worker. Handles task execution, context management, and error handling.
+- **ClaudeAgentExecutor** (`worker/claude_executor.py`): Implements AgentExecutor interface. Handles task execution, context management, and error handling.
 - **MessageConverter** (`worker/converter.py`): Bidirectional conversion between Claude Agent SDK messages and A2A protocol format.
 
 ### Two Agent Patterns

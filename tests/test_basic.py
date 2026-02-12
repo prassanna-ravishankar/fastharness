@@ -1,6 +1,7 @@
 """Basic tests for FastHarness."""
 
 import pytest
+from a2a.types import TextPart
 
 from fastharness import (
     Agent,
@@ -252,10 +253,12 @@ class TestMessageConverter:
 
     def test_text_to_artifact(self) -> None:
         artifact = MessageConverter.text_to_artifact("Result text", name="output")
-        assert artifact["name"] == "output"
-        assert len(artifact["parts"]) == 1
-        assert artifact["parts"][0]["kind"] == "text"
-        assert artifact["parts"][0]["text"] == "Result text"
+        assert artifact.name == "output"
+        assert len(artifact.parts) == 1
+        part = artifact.parts[0].root
+        assert part.kind == "text"
+        assert isinstance(part, TextPart)
+        assert part.text == "Result text"
 
 
 class TestHarnessClient:

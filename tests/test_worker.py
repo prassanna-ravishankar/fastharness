@@ -1,10 +1,13 @@
-"""Tests for ClaudeWorker."""
+"""Tests for ClaudeAgentExecutor."""
+
+import asyncio
 
 import pytest
+from a2a.types import TextPart
 
 from fastharness import AgentConfig, Skill
 from fastharness.core.agent import Agent
-from fastharness.worker.claude_worker import AgentRegistry, ClaudeWorker
+from fastharness.worker.claude_executor import AgentRegistry, ClaudeAgentExecutor
 
 
 class TestAgentRegistry:
@@ -31,72 +34,112 @@ class TestAgentRegistry:
         registry = AgentRegistry(agents={})
         assert registry.get_default() is None
 
+    def test_registry_get_by_skill(self) -> None:
+        skill = Skill(id="search", name="Search", description="Search skill")
+        config = AgentConfig(name="searcher", description="Searcher", skills=[skill])
+        agent = Agent(config=config, func=None)
+        registry = AgentRegistry(agents={"searcher": agent})
 
-class TestClaudeWorkerBuildArtifacts:
-    """Tests for ClaudeWorker.build_artifacts()."""
+        assert registry.get_by_skill("search") is agent
+        assert registry.get_by_skill("nonexistent") is None
+
+    def test_registry_resolve_by_skill(self) -> None:
+        s1 = Skill(id="s1", name="S1", description="Skill 1")
+        s2 = Skill(id="s2", name="S2", description="Skill 2")
+        a1 = Agent(config=AgentConfig(name="a1", description="A1", skills=[s1]), func=None)
+        a2 = Agent(config=AgentConfig(name="a2", description="A2", skills=[s2]), func=None)
+        registry = AgentRegistry(agents={"a1": a1, "a2": a2})
+
+        assert registry.resolve("s2") is a2
+        assert registry.resolve("s1") is a1
+
+    def test_registry_resolve_falls_back_to_default(self) -> None:
+        skill = Skill(id="s1", name="S1", description="Skill 1")
+        agent = Agent(config=AgentConfig(name="a1", description="A1", skills=[skill]), func=None)
+        registry = AgentRegistry(agents={"a1": agent})
+
+        assert registry.resolve("nonexistent") is agent
+        assert registry.resolve(None) is agent
+        assert registry.resolve() is agent
+
+    def test_registry_resolve_empty(self) -> None:
+        registry = AgentRegistry(agents={})
+        assert registry.resolve("s1") is None
+        assert registry.resolve() is None
+
+
+class TestClaudeExecutorBuildArtifacts:
+    """Tests for ClaudeAgentExecutor.build_artifacts()."""
 
     @pytest.fixture
-    def worker(self) -> ClaudeWorker:
-        from fasta2a.broker import InMemoryBroker
-        from fasta2a.storage import InMemoryStorage
+    def executor(self) -> ClaudeAgentExecutor:
+        from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
 
         registry = AgentRegistry(agents={})
-        return ClaudeWorker(
-            broker=InMemoryBroker(),
-            storage=InMemoryStorage(),
+        return ClaudeAgentExecutor(
             agent_registry=registry,
+            task_store=InMemoryTaskStore(),
         )
 
-    def test_build_artifacts_string(self, worker: ClaudeWorker) -> None:
-        artifacts = worker.build_artifacts("Hello world")
+    def test_build_artifacts_string(self, executor: ClaudeAgentExecutor) -> None:
+        artifacts = executor.build_artifacts("Hello world")
         assert len(artifacts) == 1
-        assert artifacts[0]["parts"][0]["text"] == "Hello world"
+        part = artifacts[0].parts[0].root
+        assert isinstance(part, TextPart)
+        assert part.text == "Hello world"
 
-    def test_build_artifacts_list(self, worker: ClaudeWorker) -> None:
+    def test_build_artifacts_list(self, executor: ClaudeAgentExecutor) -> None:
         fake_artifacts = [{"artifact_id": "1", "name": "test", "parts": []}]
-        artifacts = worker.build_artifacts(fake_artifacts)
+        artifacts = executor.build_artifacts(fake_artifacts)
         assert artifacts == fake_artifacts
 
-    def test_build_artifacts_none(self, worker: ClaudeWorker) -> None:
-        artifacts = worker.build_artifacts(None)
+    def test_build_artifacts_none(self, executor: ClaudeAgentExecutor) -> None:
+        artifacts = executor.build_artifacts(None)
         assert artifacts == []
 
-    def test_build_artifacts_other(self, worker: ClaudeWorker) -> None:
-        artifacts = worker.build_artifacts(42)
+    def test_build_artifacts_other(self, executor: ClaudeAgentExecutor) -> None:
+        artifacts = executor.build_artifacts(42)
         assert len(artifacts) == 1
-        assert "42" in artifacts[0]["parts"][0]["text"]
+        part = artifacts[0].parts[0].root
+        assert isinstance(part, TextPart)
+        assert "42" in part.text
 
 
-class TestClaudeWorkerTaskTracking:
-    """Tests for ClaudeWorker task tracking."""
+class TestClaudeExecutorTaskTracking:
+    """Tests for ClaudeAgentExecutor task tracking."""
 
     @pytest.fixture
-    def worker(self) -> ClaudeWorker:
-        from fasta2a.broker import InMemoryBroker
-        from fasta2a.storage import InMemoryStorage
+    def executor(self) -> ClaudeAgentExecutor:
+        from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
 
         skill = Skill(id="s1", name="S1", description="Skill 1")
         config = AgentConfig(name="test", description="Test", skills=[skill])
         agent = Agent(config=config, func=None)
         registry = AgentRegistry(agents={"test": agent})
-        return ClaudeWorker(
-            broker=InMemoryBroker(),
-            storage=InMemoryStorage(),
+        return ClaudeAgentExecutor(
             agent_registry=registry,
+            task_store=InMemoryTaskStore(),
         )
 
-    def test_running_tasks_initialized(self, worker: ClaudeWorker) -> None:
-        assert hasattr(worker, "_running_tasks")
-        assert worker._running_tasks == {}
+    def test_running_tasks_initialized(self, executor: ClaudeAgentExecutor) -> None:
+        assert hasattr(executor, "_running_tasks")
+        assert executor._running_tasks == {}
 
     @pytest.mark.asyncio
-    async def test_cancel_task_removes_from_running(self, worker: ClaudeWorker) -> None:
-        # Test that cancel_task removes task from _running_tasks dict
-        worker._running_tasks["task-123"] = True
+    async def test_cancel_task_removes_from_running(self, executor: ClaudeAgentExecutor) -> None:
+        """Cancelling a tracked asyncio task removes it from _running_tasks."""
 
-        # Directly test the removal logic without involving storage
-        task_id = "task-123"
-        if task_id in worker._running_tasks:
-            del worker._running_tasks[task_id]
+        async def _noop() -> None:
+            await asyncio.sleep(10)
 
-        assert "task-123" not in worker._running_tasks
+        task = asyncio.create_task(_noop())
+        executor._running_tasks["task-123"] = task
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        executor._running_tasks.pop("task-123", None)
+
+        assert "task-123" not in executor._running_tasks
