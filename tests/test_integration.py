@@ -20,7 +20,7 @@ async def app_client(harness: FastHarness) -> AsyncIterator[AsyncClient]:
         lifespan_cm = app.router.lifespan_context(app)
         await lifespan_cm.__aenter__()
         try:
-            transport = ASGITransport(app=app)  # type: ignore[arg-type]
+            transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://testserver") as client:
                 yield client
         finally:

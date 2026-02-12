@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+from a2a.types import TextPart
 
 from fastharness import AgentConfig, Skill
 from fastharness.core.agent import Agent
@@ -83,7 +84,9 @@ class TestClaudeExecutorBuildArtifacts:
     def test_build_artifacts_string(self, executor: ClaudeAgentExecutor) -> None:
         artifacts = executor.build_artifacts("Hello world")
         assert len(artifacts) == 1
-        assert artifacts[0].parts[0].root.text == "Hello world"
+        part = artifacts[0].parts[0].root
+        assert isinstance(part, TextPart)
+        assert part.text == "Hello world"
 
     def test_build_artifacts_list(self, executor: ClaudeAgentExecutor) -> None:
         fake_artifacts = [{"artifact_id": "1", "name": "test", "parts": []}]
@@ -97,7 +100,9 @@ class TestClaudeExecutorBuildArtifacts:
     def test_build_artifacts_other(self, executor: ClaudeAgentExecutor) -> None:
         artifacts = executor.build_artifacts(42)
         assert len(artifacts) == 1
-        assert "42" in artifacts[0].parts[0].root.text
+        part = artifacts[0].parts[0].root
+        assert isinstance(part, TextPart)
+        assert "42" in part.text
 
 
 class TestClaudeExecutorTaskTracking:
