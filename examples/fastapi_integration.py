@@ -39,7 +39,7 @@ harness.agent(
 # Lifespan that starts the harness
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Start FastHarness worker and broker."""
+    """Start FastHarness worker."""
     async with harness.lifespan_context():
         yield
 

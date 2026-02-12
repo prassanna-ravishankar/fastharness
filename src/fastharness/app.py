@@ -1,6 +1,5 @@
 """FastHarness - Wrap Claude Agent SDK and expose agents as A2A services."""
 
-import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -62,8 +61,6 @@ class FastHarness:
         description: str = "Claude-powered A2A agent",
         version: str = "1.0.0",
         url: str = "http://localhost:8000",
-        storage: Any | None = None,
-        broker: Any | None = None,
         task_store: TaskStore | None = None,
     ):
         """Initialize FastHarness.
@@ -73,30 +70,12 @@ class FastHarness:
             description: Description for the A2A agent card.
             version: Version for the A2A agent card.
             url: URL where the agent is hosted.
-            storage: DEPRECATED. Use task_store instead.
-            broker: DEPRECATED. No longer used with native A2A SDK.
             task_store: TaskStore implementation (defaults to InMemoryTaskStore).
         """
         self.name = name
         self.description = description
         self.version = version
         self.url = url
-
-        # Handle deprecated parameters
-        if storage is not None:
-            warnings.warn(
-                "The 'storage' parameter is deprecated and will be removed in a future version. "
-                "Use 'task_store' instead.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-        if broker is not None:
-            warnings.warn(
-                "The 'broker' parameter is deprecated and no longer used with native A2A SDK.",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-
         self._task_store = task_store or InMemoryTaskStore()
         self._agents: dict[str, Agent] = {}
         self._app: FastAPI | None = None
