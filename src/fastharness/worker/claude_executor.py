@@ -8,7 +8,7 @@ from a2a.server.agent_execution.agent_executor import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_store import TaskStore
-from a2a.types import Artifact, Message, Task, TaskState, TaskStatus
+from a2a.types import Artifact, Message, Role, Task, TaskState, TaskStatus
 
 from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
@@ -258,11 +258,11 @@ class ClaudeAgentExecutor(AgentExecutor):
 
             message_history = [
                 ContextMessage(
-                    role="user" if m.role == "user" else "assistant",
+                    role="user" if m.role == Role.user else "assistant",
                     content=MessageConverter.extract_text_from_parts(m.parts),
                 )
                 for m in history
-                if m.role in ("user", "assistant")
+                if m.role in (Role.user, Role.agent)
             ]
 
             ctx = AgentContext(
@@ -365,6 +365,12 @@ class ClaudeAgentExecutor(AgentExecutor):
                 "Unauthorized cancel attempt",
                 extra={"task_id": task_id, "user": _get_user_id(context)},
             )
+            # Enqueue error message to inform caller
+            error_message = MessageConverter.claude_to_a2a_message(
+                role="assistant",
+                content="Error: Access denied. You do not have permission to cancel this task.",
+            )
+            await event_queue.enqueue_event(error_message)
             return
 
         # Cancel the running asyncio task

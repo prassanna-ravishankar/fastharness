@@ -7,6 +7,7 @@ Run with: uv run python test_live.py
 
 import asyncio
 
+import uvicorn
 from dotenv import load_dotenv
 
 from fastharness import FastHarness, Skill
@@ -57,15 +58,13 @@ async def main():
 
     app = harness.app
     print(f"✅ Created app with {len(harness._agents)} agents")
-    print(f"   - assistant (general skill)")
-    print(f"   - math-expert (math skill)")
+    print("   - assistant (general skill)")
+    print("   - math-expert (math skill)")
     print()
 
     # Start the server
     print("🌐 Starting server on http://localhost:8765")
     print("   (Press Ctrl+C to stop after tests complete)\n")
-
-    import uvicorn
 
     config = uvicorn.Config(
         app, host="127.0.0.1", port=8765, log_level="info", access_log=False
@@ -94,12 +93,21 @@ if __name__ == "__main__":
     print("  2. Send a message (math skill):")
     print("     curl -X POST http://localhost:8765/ \\")
     print('       -H "Content-Type: application/json" \\')
-    print('       -d \'{"jsonrpc":"2.0","method":"message.send","params":{"contextId":"ctx-1","message":{"role":"user","parts":[{"kind":"text","text":"What is 2+2?"}]},"metadata":{"skill_id":"math"}},"id":1}\'')
+    print(
+        '       -d \'{"jsonrpc":"2.0","method":"message.send",'
+        '"params":{"contextId":"ctx-1","message":{"role":"user",'
+        '"parts":[{"kind":"text","text":"What is 2+2?"}]},'
+        '"metadata":{"skill_id":"math"}},"id":1}\''
+    )
     print()
     print("  3. Continue conversation:")
     print("     curl -X POST http://localhost:8765/ \\")
     print('       -H "Content-Type: application/json" \\')
-    print('       -d \'{"jsonrpc":"2.0","method":"message.send","params":{"contextId":"ctx-1","message":{"role":"user","parts":[{"kind":"text","text":"What about 3+3?"}]}},"id":2}\'')
+    print(
+        '       -d \'{"jsonrpc":"2.0","method":"message.send",'
+        '"params":{"contextId":"ctx-1","message":{"role":"user",'
+        '"parts":[{"kind":"text","text":"What about 3+3?"}]}},"id":2}\''
+    )
     print()
     print("=" * 70)
     print()
