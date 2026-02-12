@@ -3,7 +3,10 @@
 import warnings
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 from a2a.server.apps.jsonrpc.fastapi_app import A2AFastAPIApplication
 from a2a.server.request_handlers.default_request_handler import DefaultRequestHandler
@@ -96,7 +99,7 @@ class FastHarness:
 
         self._task_store = task_store or InMemoryTaskStore()
         self._agents: dict[str, Agent] = {}
-        self._app: Any = None
+        self._app: FastAPI | None = None
 
     def _convert_skills(self, skills: list[Skill]) -> list[A2ASkill]:
         """Convert FastHarness Skills to A2A Skills."""
@@ -269,7 +272,7 @@ class FastHarness:
 
         return decorator
 
-    def _create_app(self) -> Any:
+    def _create_app(self) -> "FastAPI":
         """Create the FastAPI application with native A2A SDK."""
         registry = AgentRegistry(agents=self._agents)
 
@@ -332,7 +335,7 @@ class FastHarness:
         yield
 
     @property
-    def app(self) -> Any:
+    def app(self) -> "FastAPI":
         """Return FastAPI-compatible app with A2A endpoints.
 
         The app can be:

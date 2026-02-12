@@ -1,5 +1,6 @@
 """ClaudeAgentExecutor - Claude SDK integration with native A2A AgentExecutor."""
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -28,15 +29,61 @@ def _ensure_history(task: Task) -> list[Message]:
     return task.history
 
 
+def _get_user_id(context: RequestContext) -> str:
+    """Extract authenticated user ID from request context."""
+    if context.call_context and context.call_context.user:
+        if context.call_context.user.is_authenticated:
+            return context.call_context.user.user_name
+    return "anonymous"
+
+
+def _authorize_task_access(task: Task, context: RequestContext) -> bool:
+    """Check if requesting user owns this task."""
+    if not task.metadata:
+        return True  # Legacy tasks without owner
+
+    task_owner = task.metadata.get("owner_id")
+    if not task_owner:
+        return True  # Legacy tasks
+
+    current_user = _get_user_id(context)
+    return task_owner == current_user
+
+
+def _extract_requested_skill(context: RequestContext) -> str | None:
+    """Extract requested skill ID from request context."""
+    metadata = context.metadata
+    if metadata:
+        skill_id = metadata.get("skill_id")
+        if skill_id:
+            return skill_id
+    return None
+
+
 @dataclass
 class AgentRegistry:
     """Registry of agents available to the executor."""
 
     agents: dict[str, "Agent"]
 
+    def __post_init__(self) -> None:
+        """Build skill-to-agent mapping."""
+        self._skill_to_agent: dict[str, str] = {}
+        for agent_name, agent in self.agents.items():
+            for skill in agent.config.skills:
+                if skill.id not in self._skill_to_agent:
+                    self._skill_to_agent[skill.id] = agent_name
+
     def get(self, name: str) -> "Agent | None":
         """Get agent by name."""
         return self.agents.get(name)
+
+    def get_by_skill(self, skill_id: str) -> "Agent | None":
+        """Get agent that provides the given skill."""
+        agent_name = self._skill_to_agent.get(skill_id)
+        if agent_name:
+            return self.agents.get(agent_name)
+        return None
 
     def get_default(self) -> "Agent | None":
         """Get the default (first registered) agent."""
@@ -57,7 +104,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
     def __post_init__(self) -> None:
         """Initialize task tracking."""
-        self._running_tasks: dict[str, bool] = {}
+        self._running_tasks: dict[str, asyncio.Task[None]] = {}
 
     def build_message_history(self, history: list[Message]) -> list[Any]:
         """Convert A2A message history to Claude SDK format."""
@@ -90,6 +137,28 @@ class ClaudeAgentExecutor(AgentExecutor):
         await event_queue.enqueue_event(error_message)
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Execute a task using the Claude SDK with cancellation tracking."""
+        task_id = context.task_id
+        if not task_id:
+            logger.error("Invalid request context: missing task_id")
+            return
+
+        # Create and track execution task for cancellation
+        exec_task = asyncio.create_task(
+            self._execute_impl(context, event_queue),
+            name=f"task-{task_id}",
+        )
+        self._running_tasks[task_id] = exec_task
+
+        try:
+            await exec_task
+        except asyncio.CancelledError:
+            logger.info("Task execution cancelled", extra={"task_id": task_id})
+            raise
+        finally:
+            self._running_tasks.pop(task_id, None)
+
+    async def _execute_impl(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Execute a task using the Claude SDK.
 
         1. Extract task info from RequestContext
@@ -114,9 +183,6 @@ class ClaudeAgentExecutor(AgentExecutor):
             extra={"task_id": task_id, "context_id": context_id},
         )
 
-        # Track running task for cancellation
-        self._running_tasks[task_id] = True
-
         try:
             # Get current task from context or create new one
             current_task = context.current_task
@@ -128,31 +194,75 @@ class ClaudeAgentExecutor(AgentExecutor):
                     status=TaskStatus(state=TaskState.working),
                     history=[message],
                     artifacts=[],
+                    metadata={"owner_id": _get_user_id(context)},
                 )
                 await self.task_store.save(current_task)
                 context.current_task = current_task
             else:
+                # Existing task - A2A SDK already updated history via update_with_message
+                # Reload to get fresh history
+                current_task = await self.task_store.get(task_id)
+                if not current_task:
+                    logger.error("Task not found in store", extra={"task_id": task_id})
+                    return
+
+                # Check authorization
+                if not _authorize_task_access(current_task, context):
+                    logger.warning(
+                        "Unauthorized task access attempt",
+                        extra={"task_id": task_id, "user": _get_user_id(context)},
+                    )
+                    await self._fail_task(
+                        current_task,
+                        "Error: Access denied. You do not have permission to access this task.",
+                        event_queue,
+                    )
+                    return
+
                 current_task.status = TaskStatus(state=TaskState.working)
                 await self.task_store.save(current_task)
+                context.current_task = current_task
 
-            # Get agent (use default if only one registered)
-            agent = self.agent_registry.get_default()
+            # Get agent - prefer by skill, fall back to default
+            requested_skill = _extract_requested_skill(context)
+            agent = None
+
+            if requested_skill:
+                agent = self.agent_registry.get_by_skill(requested_skill)
+                if agent:
+                    logger.debug(
+                        "Selected agent by skill",
+                        extra={
+                            "task_id": task_id,
+                            "skill_id": requested_skill,
+                            "agent_name": agent.config.name,
+                        },
+                    )
+                else:
+                    logger.warning(
+                        "Requested skill not found, using default agent",
+                        extra={"task_id": task_id, "skill_id": requested_skill},
+                    )
+
             if agent is None:
-                logger.error(
-                    "Task failed: no agents registered",
-                    extra={"task_id": task_id},
-                )
+                agent = self.agent_registry.get_default()
+
+            if agent is None:
+                logger.error("Task failed: no agents registered", extra={"task_id": task_id})
                 await self._fail_task(
                     current_task,
-                    "Error: No agents registered. Configure at least one agent "
-                    "using harness.agent() or @harness.agentloop() before handling tasks.",
+                    "Error: No agents registered. Configure at least one agent.",
                     event_queue,
                 )
                 return
 
-            logger.debug(
+            logger.info(
                 "Using agent for task",
-                extra={"task_id": task_id, "agent_name": agent.config.name},
+                extra={
+                    "task_id": task_id,
+                    "agent_name": agent.config.name,
+                    "requested_skill": requested_skill,
+                },
             )
 
             # Extract user prompt and build context
@@ -206,8 +316,9 @@ class ClaudeAgentExecutor(AgentExecutor):
             )
 
             # Update task with results
+            # DO NOT append the user message - it's already in history
+            # Only append the assistant's response
             task_history = _ensure_history(current_task)
-            task_history.append(message)
             task_history.append(response_message)
 
             current_task.status = TaskStatus(state=TaskState.completed)
@@ -250,9 +361,6 @@ class ClaudeAgentExecutor(AgentExecutor):
                     extra={"task_id": task_id},
                 )
 
-        finally:
-            self._running_tasks.pop(task_id, None)
-
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel a running task."""
         task_id = context.task_id
@@ -263,11 +371,36 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         logger.info("Cancelling task", extra={"task_id": task_id})
 
-        # TODO: Implement actual interruption via client.interrupt()
-        # For now, just mark as canceled
-        self._running_tasks.pop(task_id, None)
-
+        # Check authorization
         current_task = context.current_task
+        if current_task:
+            if not _authorize_task_access(current_task, context):
+                logger.warning(
+                    "Unauthorized cancel attempt",
+                    extra={"task_id": task_id, "user": _get_user_id(context)},
+                )
+                return
+
+        # Actually cancel the running task
+        running_task = self._running_tasks.get(task_id)
+        if running_task and not running_task.done():
+            logger.debug("Cancelling asyncio task", extra={"task_id": task_id})
+            running_task.cancel()
+
+            # Wait briefly for cancellation
+            try:
+                await asyncio.wait_for(asyncio.shield(running_task), timeout=0.5)
+            except (TimeoutError, asyncio.CancelledError):
+                pass
+
+        # Update task status
         if current_task:
             current_task.status = TaskStatus(state=TaskState.canceled)
             await self.task_store.save(current_task)
+
+            # Enqueue cancellation message
+            cancel_message = MessageConverter.claude_to_a2a_message(
+                role="assistant",
+                content="Task cancelled by user request.",
+            )
+            await event_queue.enqueue_event(cancel_message)
