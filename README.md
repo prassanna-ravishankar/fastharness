@@ -9,20 +9,47 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Building agents with the Claude Agent SDK is straightforward, but exposing them as interoperable services requires implementing protocol layers, managing task lifecycles, and handling message conversion between formats. FastHarness bridges this gap by wrapping the Claude Agent SDK and automatically exposing your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol using the native A2A Python SDK.
+**Turn Claude Agent SDK agents into production-ready A2A services in minutes.**
 
-Define agents with a simple decorator-based API. FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, managing async task execution, and optionally tracking costs and logging intermediate steps. A simple agent requires only a name, description, and list of skills. For complex workflows, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
+FastHarness wraps the Claude Agent SDK and automatically exposes your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol. Define agents with decorators, and FastHarness handles protocol compliance, message conversion, task lifecycle, and multi-turn conversations.
 
-Features include:
-- **Multi-turn conversations** - Maintains conversation history across requests using client pooling
-- **Cost tracking** - Monitor API usage with configurable thresholds via `CostTracker`
-- **Step logging** - Capture tool calls, messages, and turn metrics with `ConsoleStepLogger`
-- **CLAUDE.md support** - Automatically load project context and conventions
-- **MCP servers** - Connect external services via Model Context Protocol
-- **FastAPI integration** - Run standalone or mount on existing applications
-- **LiteLLM support** - Route API calls through alternative providers
+```python
+from fastharness import FastHarness, Skill
 
-FastHarness is production-ready and fully A2A protocol compliant.
+harness = FastHarness(name="my-agent")
+
+harness.agent(
+    name="assistant",
+    description="A helpful assistant",
+    skills=[Skill(id="help", name="Help", description="Answer questions")],
+    system_prompt="You are helpful.",
+    tools=["Read", "Grep"],
+)
+
+app = harness.app  # Ready to deploy
+```
+
+## Why FastHarness?
+
+Building Claude agents is easy. Making them **interoperable** is hard:
+
+| Without FastHarness | With FastHarness |
+|---------------------|------------------|
+| Implement A2A protocol manually | Automatic A2A compliance |
+| Handle message format conversion | Built-in message conversion |
+| Manage task lifecycle and state | Managed task execution |
+| Build conversation history tracking | **Multi-turn conversations out of the box** |
+| Create JSON-RPC endpoints | FastAPI endpoints ready |
+| Write agent card generation | Auto-generated agent cards |
+
+## What FastHarness Adds
+
+On top of Claude Agent SDK + A2A SDK:
+
+- **Multi-turn conversations** - Client pooling maintains conversation history across A2A requests
+- **Cost tracking** - Built-in telemetry callbacks for monitoring API usage
+- **Step logging** - Debug middleware for tool calls and intermediate steps
+- **Zero-config protocol bridge** - Decorator API handles all A2A protocol machinery
 
 ## Installation
 
@@ -31,6 +58,8 @@ uv add fastharness
 ```
 
 ## Quick Start
+
+**1. Define your agent:**
 
 ```python
 from fastharness import FastHarness, Skill
@@ -48,23 +77,59 @@ harness.agent(
 app = harness.app
 ```
 
-Run with:
+**2. Run it:**
+
 ```bash
 uvicorn mymodule:app --port 8000
 ```
 
-Test:
+**3. Test it:**
+
 ```bash
+# Get agent card
 curl http://localhost:8000/.well-known/agent-card.json
+
+# Send a message
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Hello!"}],
+        "messageId": "msg-1"
+      },
+      "metadata": {"conversation_id": "conv-123"}
+    },
+    "id": 1
+  }'
 ```
 
 ## Multi-Turn Conversations
 
-FastHarness maintains conversation history across requests by pooling Claude SDK clients. Use `conversation_id` in metadata to group related messages:
+FastHarness maintains conversation history automatically. Just use the same `conversation_id`:
 
 ```python
+# Message 1: "My name is Alice"
+# → Response: "Nice to meet you, Alice!"
+
+# Message 2: "What's my name?" (same conversation_id)
+# → Response: "Your name is Alice!"
+```
+
+**How it works:**
+- All messages with the same `conversation_id` in metadata share history
+- Claude SDK clients are pooled and reused for 15 minutes
+- No manual history management needed
+
+<details>
+<summary>Full example with curl</summary>
+
+```bash
 # First message
-{
+curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
   "jsonrpc": "2.0",
   "method": "message/send",
   "params": {
@@ -76,42 +141,50 @@ FastHarness maintains conversation history across requests by pooling Claude SDK
     "metadata": {"conversation_id": "conv-123"}
   },
   "id": 1
-}
+}'
 
-# Follow-up message (agent remembers "Alice")
-{
+# Follow-up (agent remembers "Alice")
+curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
   "jsonrpc": "2.0",
   "method": "message/send",
   "params": {
     "message": {
       "role": "user",
-      "parts": [{"kind": "text", "text": "What's my name?"}],
+      "parts": [{"kind": "text", "text": "What is my name?"}],
       "messageId": "msg-2"
     },
-    "metadata": {"conversation_id": "conv-123"}  # Same ID = same conversation
+    "metadata": {"conversation_id": "conv-123"}
   },
   "id": 2
-}
+}'
 ```
 
-All messages with the same `conversation_id` share conversation history. Clients are pooled for 15 minutes of idle time before cleanup.
+</details>
 
-## Custom Agent Loop
+## Usage Patterns
+
+### Custom Agent Loop
+
+Take full control over execution while FastHarness handles protocol machinery:
 
 ```python
 @harness.agentloop(
     name="researcher",
-    description="Multi-turn researcher",
-    skills=[Skill(id="research", name="Research", description="Deep research")],
+    description="Deep research assistant",
+    skills=[Skill(id="research", name="Research", description="Conduct research")],
 )
 async def researcher(prompt, ctx, client):
+    """Custom loop with iterative refinement."""
     result = await client.run(prompt)
-    while "need more" in result.lower():
-        result = await client.run("Continue researching")
+
+    # Keep researching until confident
+    while "need more information" in result.lower():
+        result = await client.run("Continue researching, go deeper")
+
     return result
 ```
 
-## Mount on FastAPI
+### Mount on Existing FastAPI App
 
 ```python
 from fastapi import FastAPI
@@ -128,29 +201,56 @@ app.mount("/agents", harness.app)
 
 ## Advanced Features
 
-### CLAUDE.md Support
+<details>
+<summary><b>Cost Tracking</b></summary>
 
-Agents automatically load project settings from `CLAUDE.md` by default:
+Monitor API costs with configurable thresholds:
 
 ```python
-harness.agent(
-    name="reviewer",
-    description="Code reviewer",
-    skills=[...],
-    system_prompt="You are a thorough code reviewer.",
-    # setting_sources=["project"] is default - loads CLAUDE.md automatically
-)
+from fastharness import CostTracker
 
-# To disable, pass empty list:
-harness.agent(
-    name="readonly",
-    description="Read-only assistant",
-    skills=[...],
-    setting_sources=[],  # Don't load any settings
-)
+tracker = CostTracker(warn_threshold_usd=1.0)
+
+@harness.agentloop(...)
+async def agent(prompt, ctx, client):
+    client.telemetry_callbacks.append(tracker)
+    result = await client.run(prompt)
+    print(f"Cost: ${tracker.total_cost_usd:.4f}")
+    return result
 ```
 
-### MCP Server Integration
+</details>
+
+<details>
+<summary><b>Step Logging</b></summary>
+
+Debug with detailed step-by-step logging:
+
+```python
+from fastharness import ConsoleStepLogger
+
+client = HarnessClient(step_logger=ConsoleStepLogger())
+result = await client.run(prompt)
+```
+
+Output:
+```
+[step_logger] Tool call
+    turn: 0
+    tool_name: Read
+    tool_id: call_123
+[step_logger] Assistant message
+    turn: 0
+    text_preview: Found the bug...
+[step_logger] Turn complete
+    turn: 0
+    cost_usd: 0.01
+```
+
+</details>
+
+<details>
+<summary><b>MCP Server Integration</b></summary>
 
 Connect external services via Model Context Protocol:
 
@@ -169,147 +269,75 @@ harness.agent(
 )
 ```
 
-### Cost Tracking
+</details>
 
-Monitor API costs with configurable thresholds:
+<details>
+<summary><b>CLAUDE.md Support</b></summary>
 
-```python
-from fastharness import CostTracker
-
-tracker = CostTracker(warn_threshold_usd=1.0)
-
-@harness.agentloop(...)
-async def agent(prompt, ctx, client):
-    client.telemetry_callbacks.append(tracker)
-    result = await client.run(prompt)
-    print(f"Cost: ${tracker.total_cost_usd:.4f}")
-    return result
-```
-
-### Step Logging
-
-Log intermediate steps for debugging:
+Agents automatically load project context from `CLAUDE.md`:
 
 ```python
-from fastharness import ConsoleStepLogger
-
-client = HarnessClient(
-    step_logger=ConsoleStepLogger(),
+harness.agent(
+    name="reviewer",
+    description="Code reviewer",
+    skills=[...],
+    # setting_sources=["project"] is default - loads CLAUDE.md
 )
-result = await client.run(prompt)
+
+# To disable:
+harness.agent(
+    name="readonly",
+    description="Read-only assistant",
+    skills=[...],
+    setting_sources=[],  # Don't load settings
+)
 ```
 
-Output example:
-```
-[step_logger] Tool call
-    turn: 0
-    tool_name: Read
-    tool_id: call_123
-[step_logger] Assistant message
-    turn: 0
-    text_preview: Found the bug in line 42...
-[step_logger] Turn complete
-    turn: 0
-    cost_usd: 0.01
-    tokens: {'input': 150, 'output': 50}
-```
+</details>
 
-## HarnessClient Options
+## Configuration
 
-The `HarnessClient` passed to agent functions supports these options:
+### HarnessClient Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
 | `system_prompt` | `None` | System prompt for Claude |
-| `tools` | `[]` | Allowed tools (e.g., `["Read", "Grep", "Glob"]`) |
-| `model` | `claude-sonnet-4-20250514` | Claude model to use |
-| `max_turns` | `None` | Maximum conversation turns |
-| `permission_mode` | `bypassPermissions` | Permission handling mode |
-| `mcp_servers` | `{}` | MCP server configurations |
-| `setting_sources` | `["project"]` | Filesystem settings to load (loads CLAUDE.md) |
-| `telemetry_callbacks` | `[]` | Callbacks for execution metrics |
-| `step_logger` | `None` | Logger for intermediate steps |
-| `output_format` | `None` | JSON schema for structured output (e.g., `{"type": "json_schema", "schema": {...}}`) |
+| `tools` | `[]` | Allowed tools (`["Read", "Grep", "Glob"]`) |
+| `model` | `claude-sonnet-4-20250514` | Claude model |
+| `max_turns` | `None` | Max conversation turns |
+| `mcp_servers` | `{}` | MCP server configs |
+| `setting_sources` | `["project"]` | Load CLAUDE.md automatically |
+| `output_format` | `None` | JSON schema for structured output |
 
 Override per-call:
 ```python
 result = await client.run(prompt, model="claude-opus-4-20250514", max_turns=5)
 ```
 
-## A2A Endpoints
-
-Running FastHarness exposes these endpoints:
+### A2A Endpoints
 
 | Endpoint | Description |
 |----------|-------------|
 | `/.well-known/agent-card.json` | Agent metadata and capabilities |
-| `/` | JSON-RPC endpoint (`message/send`, `tasks/get`, etc.) |
-| `/docs` | Interactive documentation |
+| `/` | JSON-RPC endpoint (`message/send`, `tasks/get`) |
+| `/docs` | Interactive API documentation |
 
 ## Examples
 
-See the `examples/` directory for complete working examples:
+Complete working examples in [`examples/`](examples/):
 
-- **[simple_agent.py](examples/simple_agent.py)** - Standalone agent service with multi-agent support
-- **[fastapi_integration.py](examples/fastapi_integration.py)** - Mounting FastHarness on existing FastAPI app
-- **[advanced_features.py](examples/advanced_features.py)** - Cost tracking, step logging, and MCP server configuration
+- **[simple_agent.py](examples/simple_agent.py)** - Basic agent with multi-turn support
+- **[fastapi_integration.py](examples/fastapi_integration.py)** - Mounting on existing FastAPI app
+- **[advanced_features.py](examples/advanced_features.py)** - Cost tracking, logging, MCP servers
 
 Run examples:
 ```bash
-# Standalone agent
 uv run uvicorn examples.simple_agent:app --port 8000
-
-# FastAPI integration
-uv run uvicorn examples.fastapi_integration:app --port 8000
 ```
 
-Test with:
-```bash
-# Get agent card
-curl http://localhost:8000/.well-known/agent-card.json
+## LiteLLM Integration
 
-# Send message (A2A JSON-RPC)
-curl -X POST http://localhost:8000/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "message/send",
-    "params": {
-      "message": {
-        "role": "user",
-        "parts": [{"kind": "text", "text": "Hello"}],
-        "messageId": "msg-001"
-      },
-      "metadata": {
-        "conversation_id": "conv-001"
-      }
-    },
-    "id": 1
-  }'
-
-# Follow-up message in same conversation
-curl -X POST http://localhost:8000/ \
-  -H "Content-Type: application/json" \
-  -d '{
-    "jsonrpc": "2.0",
-    "method": "message/send",
-    "params": {
-      "message": {
-        "role": "user",
-        "parts": [{"kind": "text", "text": "What did I just say?"}],
-        "messageId": "msg-002"
-      },
-      "metadata": {
-        "conversation_id": "conv-001"
-      }
-    },
-    "id": 2
-  }'
-```
-
-## LiteLLM Support
-
-Set environment variables to use LiteLLM as a proxy:
+Route through LiteLLM for alternative providers:
 
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:4000
@@ -319,4 +347,10 @@ ANTHROPIC_MODEL=sonnet-4
 
 ## License
 
-MIT
+MIT © [Prassanna Ravishankar](https://github.com/prassanna-ravishankar)
+
+---
+
+<p align="center">
+  <i>Built for the Claude Agent SDK community</i>
+</p>
