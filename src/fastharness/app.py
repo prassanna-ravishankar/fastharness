@@ -273,6 +273,9 @@ class FastHarness:
             task_store=self._task_store,
         )
 
+        # Store executor reference for lifecycle management
+        self._executor = executor
+
         # Create DefaultRequestHandler (handles all JSON-RPC methods)
         handler = DefaultRequestHandler(
             agent_executor=executor,
@@ -309,9 +312,16 @@ class FastHarness:
         # Ensure app is created
         _ = self.app
 
-        # Native SDK manages lifecycle internally
-        # Task store doesn't require explicit lifecycle management
-        yield
+        # Start client pool cleanup task
+        if hasattr(self, "_executor"):
+            await self._executor._client_pool.start_cleanup_task()
+
+        try:
+            yield
+        finally:
+            # Shutdown client pool on app shutdown
+            if hasattr(self, "_executor"):
+                await self._executor._client_pool.shutdown()
 
     @property
     def app(self) -> "FastAPI":

@@ -14,6 +14,7 @@ from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
 from fastharness.logging import get_logger
+from fastharness.worker.client_pool import ClientPool
 from fastharness.worker.converter import MessageConverter
 
 if TYPE_CHECKING:
@@ -110,8 +111,9 @@ class ClaudeAgentExecutor(AgentExecutor):
     task_store: TaskStore
 
     def __post_init__(self) -> None:
-        """Initialize task tracking."""
+        """Initialize task tracking and client pool."""
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
+        self._client_pool = ClientPool(ttl_minutes=15)
 
     def build_message_history(self, history: list[Message]) -> list[Any]:
         """Convert A2A message history to Claude SDK format."""
@@ -271,8 +273,29 @@ class ClaudeAgentExecutor(AgentExecutor):
                 message_history=message_history,
             )
 
-            # Build HarnessClient from agent config
+            # Build ClaudeAgentOptions from agent config
+            from typing import Literal, cast
+
+            from claude_agent_sdk import ClaudeAgentOptions
+
             config = agent.config
+            options = ClaudeAgentOptions(
+                system_prompt=config.system_prompt,
+                allowed_tools=config.tools,
+                model=config.model,
+                max_turns=config.max_turns,
+                mcp_servers=config.mcp_servers,
+                setting_sources=cast(
+                    list[Literal["user", "project", "local"]] | None, config.setting_sources
+                ),
+                output_format=config.output_format,
+                permission_mode="bypassPermissions",
+            )
+
+            # Get or create pooled client
+            pooled_client, is_new = await self._client_pool.get_or_create(context_id, options)
+
+            # Build HarnessClient with pooled SDK client
             client = HarnessClient(
                 system_prompt=config.system_prompt,
                 tools=config.tools,
@@ -281,6 +304,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 mcp_servers=config.mcp_servers,
                 setting_sources=config.setting_sources,
                 output_format=config.output_format,
+                pooled_client=pooled_client,
             )
 
             # Execute agent
@@ -313,6 +337,9 @@ class ClaudeAgentExecutor(AgentExecutor):
             await self.task_store.save(current_task)
             await event_queue.enqueue_event(response_message)
 
+            # Cleanup pooled client on task completion
+            await self._client_pool.remove(context_id)
+
             logger.info(
                 "Task completed successfully",
                 extra={"task_id": task_id, "artifact_count": len(artifacts)},
@@ -327,6 +354,9 @@ class ClaudeAgentExecutor(AgentExecutor):
                     "error_type": type(e).__name__,
                 },
             )
+
+            # Cleanup pooled client on task failure
+            await self._client_pool.remove(context_id)
 
             try:
                 if context.current_task:
@@ -385,6 +415,10 @@ class ClaudeAgentExecutor(AgentExecutor):
         # Update task status
         if not current_task:
             return
+
+        # Cleanup pooled client on task cancellation
+        if context.context_id:
+            await self._client_pool.remove(context.context_id)
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)

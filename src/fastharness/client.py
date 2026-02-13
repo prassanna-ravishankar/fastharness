@@ -43,6 +43,7 @@ class HarnessClient:
     output_format: dict[str, Any] | None = None
     telemetry_callbacks: list[TelemetryCallback] = field(default_factory=list)
     step_logger: StepLogger | None = None
+    pooled_client: ClaudeSDKClient | None = None
 
     def _build_options(self, **overrides: Any) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions, merging client config with overrides.
@@ -170,7 +171,9 @@ class HarnessClient:
         turn_number = 0
 
         try:
-            async with ClaudeSDKClient(options) as client:
+            if self.pooled_client:
+                # Use pooled client directly (no context manager)
+                client = self.pooled_client
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, AssistantMessage):
@@ -185,6 +188,23 @@ class HarnessClient:
                         structured_output = getattr(message, "structured_output", None)
                         turn_number += 1
                         break
+            else:
+                # Create temporary client (existing behavior)
+                async with ClaudeSDKClient(options) as client:
+                    await client.query(prompt)
+                    async for message in client.receive_response():
+                        if isinstance(message, AssistantMessage):
+                            for block in message.content:
+                                if isinstance(block, TextBlock):
+                                    final_text = block.text
+                            await self._log_assistant_blocks(message.content, turn_number)
+                        elif isinstance(message, ResultMessage):
+                            await self._log_turn_complete(message, turn_number)
+                            if message.result:
+                                final_text = message.result
+                            structured_output = getattr(message, "structured_output", None)
+                            turn_number += 1
+                            break
         except Exception as e:
             logger.exception(
                 "Claude Agent SDK execution failed",
@@ -215,7 +235,9 @@ class HarnessClient:
         turn_number = 0
 
         try:
-            async with ClaudeSDKClient(options) as client:
+            if self.pooled_client:
+                # Use pooled client directly (no context manager)
+                client = self.pooled_client
                 await client.query(prompt)
                 async for message in client.receive_response():
                     if isinstance(message, AssistantMessage):
@@ -239,6 +261,32 @@ class HarnessClient:
                         )
                         turn_number += 1
                         break
+            else:
+                # Create temporary client (existing behavior)
+                async with ClaudeSDKClient(options) as client:
+                    await client.query(prompt)
+                    async for message in client.receive_response():
+                        if isinstance(message, AssistantMessage):
+                            await self._log_assistant_blocks(message.content, turn_number)
+                            for block in message.content:
+                                if isinstance(block, TextBlock):
+                                    final_text = block.text
+                                    yield TextEvent(text=block.text)
+                                elif hasattr(block, "name") and hasattr(block, "input"):
+                                    yield ToolEvent(
+                                        tool_name=getattr(block, "name", ""),
+                                        tool_input=getattr(block, "input", {}),
+                                    )
+                        elif isinstance(message, ResultMessage):
+                            await self._log_turn_complete(message, turn_number)
+                            if message.result:
+                                final_text = message.result
+                            yield DoneEvent(
+                                final_text=final_text,
+                                structured_output=getattr(message, "structured_output", None),
+                            )
+                            turn_number += 1
+                            break
         except Exception as e:
             logger.exception(
                 "Claude Agent SDK streaming failed",
