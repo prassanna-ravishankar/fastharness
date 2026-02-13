@@ -126,7 +126,7 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/agents", harness.app)
 ```
 
-## v1.0.0 Features
+## Advanced Features
 
 ### CLAUDE.md Support
 

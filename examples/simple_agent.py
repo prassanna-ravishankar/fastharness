@@ -1,7 +1,28 @@
 """Simple agent example.
 
 Run with: uvicorn examples.simple_agent:app --port 8000
-Test: curl http://localhost:8000/.well-known/agent-card.json
+
+Test with:
+  # Get agent card
+  curl http://localhost:8000/.well-known/agent-card.json
+
+  # Send first message
+  curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
+    "jsonrpc": "2.0", "method": "message/send",
+    "params": {
+      "message": {"role": "user", "parts": [{"kind": "text", "text": "My name is Bob"}], "messageId": "msg-1"},
+      "metadata": {"skill_id": "help", "conversation_id": "conv-123"}
+    }, "id": 1
+  }'
+
+  # Follow-up message (agent remembers context)
+  curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
+    "jsonrpc": "2.0", "method": "message/send",
+    "params": {
+      "message": {"role": "user", "parts": [{"kind": "text", "text": "What is my name?"}], "messageId": "msg-2"},
+      "metadata": {"skill_id": "help", "conversation_id": "conv-123"}
+    }, "id": 2
+  }'
 """
 
 from fastharness import AgentContext, FastHarness, HarnessClient, Skill
