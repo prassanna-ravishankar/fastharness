@@ -14,6 +14,7 @@ Building agents with the Claude Agent SDK is straightforward, but exposing them 
 Define agents with a simple decorator-based API. FastHarness handles the rest: generating agent cards, exposing JSON-RPC endpoints, converting between Claude SDK messages and A2A format, managing async task execution, and optionally tracking costs and logging intermediate steps. A simple agent requires only a name, description, and list of skills. For complex workflows, the `@agentloop` decorator gives you full control over the execution loop while FastHarness manages the protocol machinery.
 
 Features include:
+- **Multi-turn conversations** - Maintains conversation history across requests using client pooling
 - **Cost tracking** - Monitor API usage with configurable thresholds via `CostTracker`
 - **Step logging** - Capture tool calls, messages, and turn metrics with `ConsoleStepLogger`
 - **CLAUDE.md support** - Automatically load project context and conventions
@@ -56,6 +57,44 @@ Test:
 ```bash
 curl http://localhost:8000/.well-known/agent-card.json
 ```
+
+## Multi-Turn Conversations
+
+FastHarness maintains conversation history across requests by pooling Claude SDK clients. Use `conversation_id` in metadata to group related messages:
+
+```python
+# First message
+{
+  "jsonrpc": "2.0",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "parts": [{"kind": "text", "text": "My name is Alice"}],
+      "messageId": "msg-1"
+    },
+    "metadata": {"conversation_id": "conv-123"}
+  },
+  "id": 1
+}
+
+# Follow-up message (agent remembers "Alice")
+{
+  "jsonrpc": "2.0",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "role": "user",
+      "parts": [{"kind": "text", "text": "What's my name?"}],
+      "messageId": "msg-2"
+    },
+    "metadata": {"conversation_id": "conv-123"}  # Same ID = same conversation
+  },
+  "id": 2
+}
+```
+
+All messages with the same `conversation_id` share conversation history. Clients are pooled for 15 minutes of idle time before cleanup.
 
 ## Custom Agent Loop
 
@@ -236,16 +275,35 @@ curl -X POST http://localhost:8000/ \
     "jsonrpc": "2.0",
     "method": "message/send",
     "params": {
-      "id": "task-001",
-      "contextId": "ctx-001",
       "message": {
         "role": "user",
         "parts": [{"kind": "text", "text": "Hello"}],
-        "kind": "message",
         "messageId": "msg-001"
+      },
+      "metadata": {
+        "conversation_id": "conv-001"
       }
     },
     "id": 1
+  }'
+
+# Follow-up message in same conversation
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/send",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "What did I just say?"}],
+        "messageId": "msg-002"
+      },
+      "metadata": {
+        "conversation_id": "conv-001"
+      }
+    },
+    "id": 2
   }'
 ```
 
