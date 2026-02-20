@@ -74,9 +74,10 @@ async def test_pool_debug():
                     "message": {
                         "messageId": "msg-1",
                         "role": "user",
+                        "contextId": context_id,
                         "parts": [{"kind": "text", "text": "Hello, remember the word BANANA"}],
                     },
-                    "metadata": {"skill_id": "chat", "conversation_id": context_id},
+                    "metadata": {"skill_id": "chat"},
                 },
                 "id": 1,
             }
@@ -96,9 +97,10 @@ async def test_pool_debug():
                     "message": {
                         "messageId": "msg-2",
                         "role": "user",
+                        "contextId": context_id,
                         "parts": [{"kind": "text", "text": "What word did I tell you to remember?"}],
                     },
-                    "metadata": {"skill_id": "chat", "conversation_id": context_id},
+                    "metadata": {"skill_id": "chat"},
                 },
                 "id": 2,
             }

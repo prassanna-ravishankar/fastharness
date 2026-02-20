@@ -10,17 +10,17 @@ Test with:
   curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
     "jsonrpc": "2.0", "method": "message/send",
     "params": {
-      "message": {"role": "user", "parts": [{"kind": "text", "text": "My name is Bob"}], "messageId": "msg-1"},
-      "metadata": {"skill_id": "help", "conversation_id": "conv-123"}
+      "message": {"role": "user", "contextId": "conv-123", "parts": [{"kind": "text", "text": "My name is Bob"}], "messageId": "msg-1"},
+      "metadata": {"skill_id": "help"}
     }, "id": 1
   }'
 
-  # Follow-up message (agent remembers context)
+  # Follow-up message (agent remembers context via contextId)
   curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
     "jsonrpc": "2.0", "method": "message/send",
     "params": {
-      "message": {"role": "user", "parts": [{"kind": "text", "text": "What is my name?"}], "messageId": "msg-2"},
-      "metadata": {"skill_id": "help", "conversation_id": "conv-123"}
+      "message": {"role": "user", "contextId": "conv-123", "parts": [{"kind": "text", "text": "What is my name?"}], "messageId": "msg-2"},
+      "metadata": {"skill_id": "help"}
     }, "id": 2
   }'
 """

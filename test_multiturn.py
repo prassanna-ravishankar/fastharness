@@ -24,9 +24,10 @@ async def send_message(client: httpx.AsyncClient, context_id: str, text: str, ms
             "message": {
                 "messageId": f"msg-{msg_id}",
                 "role": "user",
+                "contextId": context_id,
                 "parts": [{"kind": "text", "text": text}],
             },
-            "metadata": {"skill_id": "chat", "conversation_id": context_id},
+            "metadata": {"skill_id": "chat"},
         },
         "id": msg_id,
     }

@@ -25,33 +25,21 @@ logger = get_logger("executor")
 
 @dataclass(frozen=True)
 class HarnessRequestMetadata:
-    """Typed view over well-known keys in RequestContext.metadata.
+    """Typed view over FastHarness extension keys in RequestContext.metadata.
 
     Parsed once at the request boundary so downstream code can use
     typed fields instead of repeated dict.get() calls.
     """
 
     skill_id: str | None = None
-    conversation_id: str | None = None
-    owner_id: str | None = None
 
     @classmethod
     def from_context(cls, context: RequestContext) -> "HarnessRequestMetadata":
-        """Extract well-known metadata fields from a RequestContext."""
+        """Extract FastHarness extension fields from a RequestContext."""
         raw = context.metadata
-        if not raw:
-            return cls()
         return cls(
             skill_id=str(raw["skill_id"]) if raw.get("skill_id") else None,
-            conversation_id=(
-                str(raw["conversation_id"]) if raw.get("conversation_id") else None
-            ),
-            owner_id=str(raw["owner_id"]) if raw.get("owner_id") else None,
         )
-
-    def pool_key(self, context_id: str) -> str:
-        """Derive the client-pool key: conversation_id if set, else context_id."""
-        return self.conversation_id or context_id
 
 
 def _ensure_history(task: Task) -> list[Message]:
@@ -213,7 +201,6 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Parse metadata once at the boundary
         meta = HarnessRequestMetadata.from_context(context)
-        pool_key = meta.pool_key(context_id)
 
         logger.info(
             "Starting task execution",
@@ -319,12 +306,12 @@ class ClaudeAgentExecutor(AgentExecutor):
                 permission_mode="bypassPermissions",
             )
 
-            # Get or create pooled client
-            pooled_client, is_new = await self._client_pool.get_or_create(pool_key, options)
+            # Get or create pooled client keyed by A2A context_id
+            pooled_client, is_new = await self._client_pool.get_or_create(context_id, options)
             logger.info(
                 "Retrieved pooled client",
                 extra={
-                    "pool_key": pool_key,
+                    "pool_key": context_id,
                     "context_id": context_id,
                     "is_new": is_new,
                     "pool_size": len(self._client_pool._pool),
@@ -391,7 +378,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             )
 
             # Cleanup pooled client on task failure
-            await self._client_pool.remove(pool_key)
+            await self._client_pool.remove(context_id)
 
             try:
                 if context.current_task:
@@ -452,8 +439,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Cleanup pooled client on task cancellation
         if context.context_id:
-            meta = HarnessRequestMetadata.from_context(context)
-            await self._client_pool.remove(meta.pool_key(context.context_id))
+            await self._client_pool.remove(context.context_id)
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)
