@@ -306,12 +306,13 @@ class ClaudeAgentExecutor(AgentExecutor):
                 permission_mode="bypassPermissions",
             )
 
-            # Get or create pooled client keyed by A2A context_id
-            pooled_client, is_new = await self._client_pool.get_or_create(context_id, options)
+            # Pool key scoped to user+context to isolate sessions between users
+            pool_key = f"{_get_user_id(context)}:{context_id}"
+            pooled_client, is_new = await self._client_pool.get_or_create(pool_key, options)
             logger.info(
                 "Retrieved pooled client",
                 extra={
-                    "pool_key": context_id,
+                    "pool_key": pool_key,
                     "context_id": context_id,
                     "is_new": is_new,
                     "pool_size": len(self._client_pool._pool),
@@ -378,7 +379,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             )
 
             # Cleanup pooled client on task failure
-            await self._client_pool.remove(context_id)
+            await self._client_pool.remove(f"{_get_user_id(context)}:{context_id}")
 
             try:
                 if context.current_task:
@@ -439,7 +440,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Cleanup pooled client on task cancellation
         if context.context_id:
-            await self._client_pool.remove(context.context_id)
+            await self._client_pool.remove(f"{_get_user_id(context)}:{context.context_id}")
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)

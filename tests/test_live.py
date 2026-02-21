@@ -42,7 +42,7 @@ async def send(
         },
         "id": msg_id,
     }
-    response = await client.post(f"http://localhost:{port}/", json=payload, timeout=60.0)
+    response = await client.post(f"http://127.0.0.1:{port}/", json=payload, timeout=60.0)
     result = response.json()
     if "result" not in result:
         return None
