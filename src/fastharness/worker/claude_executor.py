@@ -23,6 +23,25 @@ if TYPE_CHECKING:
 logger = get_logger("executor")
 
 
+@dataclass(frozen=True)
+class HarnessRequestMetadata:
+    """Typed view over FastHarness extension keys in RequestContext.metadata.
+
+    Parsed once at the request boundary so downstream code can use
+    typed fields instead of repeated dict.get() calls.
+    """
+
+    skill_id: str | None = None
+
+    @classmethod
+    def from_context(cls, context: RequestContext) -> "HarnessRequestMetadata":
+        """Extract FastHarness extension fields from a RequestContext."""
+        raw = context.metadata
+        return cls(
+            skill_id=str(raw["skill_id"]) if raw.get("skill_id") else None,
+        )
+
+
 def _ensure_history(task: Task) -> list[Message]:
     """Ensure task.history is a list, initializing it if None."""
     if task.history is None:
@@ -49,13 +68,6 @@ def _authorize_task_access(task: Task, context: RequestContext) -> bool:
 
     current_user = _get_user_id(context)
     return task_owner == current_user
-
-
-def _extract_requested_skill(context: RequestContext) -> str | None:
-    """Extract requested skill ID from request context."""
-    if context.metadata:
-        return context.metadata.get("skill_id") or None
-    return None
 
 
 @dataclass
@@ -187,6 +199,9 @@ class ClaudeAgentExecutor(AgentExecutor):
             logger.error("Invalid request context: missing task_id, context_id, or message")
             return
 
+        # Parse metadata once at the boundary
+        meta = HarnessRequestMetadata.from_context(context)
+
         logger.info(
             "Starting task execution",
             extra={"task_id": task_id, "context_id": context_id},
@@ -233,8 +248,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 context.current_task = current_task
 
             # Resolve agent by requested skill, falling back to default
-            requested_skill = _extract_requested_skill(context)
-            agent = self.agent_registry.resolve(requested_skill)
+            agent = self.agent_registry.resolve(meta.skill_id)
 
             if agent is None:
                 logger.error("Task failed: no agents registered", extra={"task_id": task_id})
@@ -250,7 +264,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 extra={
                     "task_id": task_id,
                     "agent_name": agent.config.name,
-                    "requested_skill": requested_skill,
+                    "requested_skill": meta.skill_id,
                 },
             )
 
@@ -292,12 +306,8 @@ class ClaudeAgentExecutor(AgentExecutor):
                 permission_mode="bypassPermissions",
             )
 
-            # Use conversation_id from metadata as pool key if available, otherwise context_id
-            pool_key = context.metadata.get("conversation_id") if context.metadata else None
-            if not pool_key:
-                pool_key = context_id
-
-            # Get or create pooled client
+            # Pool key scoped to user+context to isolate sessions between users
+            pool_key = f"{_get_user_id(context)}:{context_id}"
             pooled_client, is_new = await self._client_pool.get_or_create(pool_key, options)
             logger.info(
                 "Retrieved pooled client",
@@ -340,9 +350,8 @@ class ClaudeAgentExecutor(AgentExecutor):
                 content=result if isinstance(result, str) else str(result),
             )
 
-            # Update task with results
-            # DO NOT append the user message - it's already in history
-            # Only append the assistant's response
+            # Update task with results (only the assistant's response; user message
+            # is already in history)
             task_history = _ensure_history(current_task)
             task_history.append(response_message)
 
@@ -370,8 +379,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             )
 
             # Cleanup pooled client on task failure
-            pool_key = context.metadata.get("conversation_id") if context.metadata else context_id
-            await self._client_pool.remove(pool_key)
+            await self._client_pool.remove(f"{_get_user_id(context)}:{context_id}")
 
             try:
                 if context.current_task:
@@ -410,7 +418,6 @@ class ClaudeAgentExecutor(AgentExecutor):
                 "Unauthorized cancel attempt",
                 extra={"task_id": task_id, "user": _get_user_id(context)},
             )
-            # Enqueue error message to inform caller
             error_message = MessageConverter.claude_to_a2a_message(
                 role="assistant",
                 content="Error: Access denied. You do not have permission to cancel this task.",
@@ -433,8 +440,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Cleanup pooled client on task cancellation
         if context.context_id:
-            pool_key = context.metadata.get("conversation_id") if context.metadata else context.context_id
-            await self._client_pool.remove(pool_key)
+            await self._client_pool.remove(f"{_get_user_id(context)}:{context.context_id}")
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)
