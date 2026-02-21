@@ -101,7 +101,6 @@ curl -X POST http://localhost:8000/ \
         "parts": [{"kind": "text", "text": "Hello!"}],
         "messageId": "msg-1"
       },
-      "metadata": {"conversation_id": "conv-123"}
     },
     "id": 1
   }'
@@ -109,18 +108,18 @@ curl -X POST http://localhost:8000/ \
 
 ## Multi-Turn Conversations
 
-FastHarness maintains conversation history automatically. Just use the same `conversation_id`:
+FastHarness maintains conversation history automatically. Just use the same `contextId` on the message — this is the standard A2A conversation identifier:
 
 ```python
 # Message 1: "My name is Alice"
 # → Response: "Nice to meet you, Alice!"
 
-# Message 2: "What's my name?" (same conversation_id)
+# Message 2: "What's my name?" (same contextId)
 # → Response: "Your name is Alice!"
 ```
 
 **How it works:**
-- All messages with the same `conversation_id` in metadata share history
+- All messages with the same `contextId` share history via the client pool
 - Claude SDK clients are pooled and reused for 15 minutes
 - No manual history management needed
 
@@ -135,10 +134,10 @@ curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
   "params": {
     "message": {
       "role": "user",
+      "contextId": "conv-123",
       "parts": [{"kind": "text", "text": "My name is Alice"}],
       "messageId": "msg-1"
-    },
-    "metadata": {"conversation_id": "conv-123"}
+    }
   },
   "id": 1
 }'
@@ -150,10 +149,10 @@ curl -X POST http://localhost:8000/ -H "Content-Type: application/json" -d '{
   "params": {
     "message": {
       "role": "user",
+      "contextId": "conv-123",
       "parts": [{"kind": "text", "text": "What is my name?"}],
       "messageId": "msg-2"
-    },
-    "metadata": {"conversation_id": "conv-123"}
+    }
   },
   "id": 2
 }'
