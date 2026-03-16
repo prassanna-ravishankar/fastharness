@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load .env before anything that reads os.environ
 
+from fastharness.a2a_client import FastHarnessClient
 from fastharness.app import FastHarness
 from fastharness.client import HarnessClient
 from fastharness.core.agent import Agent, AgentConfig
@@ -21,8 +22,9 @@ __version__ = "1.1.0"
 __all__ = [
     # Main class
     "FastHarness",
-    # Client
+    # Clients
     "HarnessClient",
+    "FastHarnessClient",
     # Agent types
     "Agent",
     "AgentConfig",

@@ -106,10 +106,34 @@ app = harness.app
 uvicorn mymodule:app --port 8000
 ```
 
-**3. Test it:**
+**3. Talk to it (Python):**
+
+```python
+import asyncio
+from fastharness import FastHarnessClient
+
+async def main():
+    async with FastHarnessClient("http://localhost:8000") as client:
+        reply = await client.send("Hello!")
+        print(reply)
+
+        # Multi-turn — same context_id maintains conversation
+        reply = await client.send("My name is Alice", context_id="conv-1")
+        reply = await client.send("What's my name?", context_id="conv-1")
+        print(reply)  # "Alice"
+
+        # Stream tokens as they arrive
+        async for chunk in client.stream("Write a haiku"):
+            print(chunk, end="", flush=True)
+
+asyncio.run(main())
+```
+
+<details>
+<summary>Or with curl</summary>
 
 ```bash
-# Get agent card
+# Agent card
 curl http://localhost:8000/.well-known/agent-card.json
 
 # Send a message
@@ -123,17 +147,12 @@ curl -X POST http://localhost:8000/ \
         "role": "user",
         "parts": [{"kind": "text", "text": "Hello!"}],
         "messageId": "msg-1"
-      },
+      }
     },
     "id": 1
   }'
-```
 
-**4. Stream responses (SSE):**
-
-Default agents stream tokens as they arrive via `message/sendStream`:
-
-```bash
+# Stream (SSE)
 curl -X POST http://localhost:8000/ \
   -H "Content-Type: application/json" \
   -H "Accept: text/event-stream" \
@@ -151,7 +170,7 @@ curl -X POST http://localhost:8000/ \
   }'
 ```
 
-Each text chunk arrives as a `TaskArtifactUpdateEvent` with `append: true`, followed by `last_chunk: true` when complete.
+</details>
 
 ## Runtime Backends
 
@@ -451,7 +470,7 @@ result = await client.run(prompt, model="claude-opus-4-20250514", max_turns=5)
 | Endpoint | Description |
 |----------|-------------|
 | `/.well-known/agent-card.json` | Agent metadata and capabilities |
-| `/` | JSON-RPC endpoint (`message/send`, `tasks/get`) |
+| `/` | JSON-RPC endpoint (`message/send`, `message/sendStream`, `tasks/get`, `tasks/cancel`) |
 | `/docs` | Interactive API documentation |
 
 ## Architecture
