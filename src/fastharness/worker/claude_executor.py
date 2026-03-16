@@ -36,7 +36,7 @@ class HarnessRequestMetadata:
     @classmethod
     def from_context(cls, context: RequestContext) -> "HarnessRequestMetadata":
         """Extract FastHarness extension fields from a RequestContext."""
-        raw = context.metadata
+        raw = context.metadata or {}
         return cls(
             skill_id=str(raw["skill_id"]) if raw.get("skill_id") else None,
         )

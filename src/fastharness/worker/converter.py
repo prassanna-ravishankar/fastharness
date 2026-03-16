@@ -161,8 +161,10 @@ class MessageConverter:
         )
 
     @staticmethod
-    def extract_text_from_parts(parts: list[Part]) -> str:
+    def extract_text_from_parts(parts: list[Part] | None) -> str:
         """Extract plain text from A2A message parts."""
+        if not parts:
+            return ""
         texts = []
         for part in parts:
             normalized = _normalize_part(part)
