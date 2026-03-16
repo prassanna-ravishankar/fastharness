@@ -168,7 +168,6 @@ class HarnessClient:
         Raises:
             RuntimeError: If Claude Agent SDK execution fails.
         """
-        options = self._build_options(**opts)
         final_text = ""
         structured_output: Any = None
         turn_number = 0
@@ -176,12 +175,14 @@ class HarnessClient:
         try:
             if self.runtime is not None:
                 result = await self.runtime.run(prompt)
-                # runtime.run() returns str | structured_output directly
                 if isinstance(result, str):
                     final_text = result
+                    await self._log_step("assistant_message", 0, {"text": result})
                 else:
                     structured_output = result
+                await self._log_step("turn_complete", 0, {})
             else:
+                options = self._build_options(**opts)
                 # Create temporary client (existing behaviour)
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
@@ -223,15 +224,19 @@ class HarnessClient:
         Raises:
             RuntimeError: If Claude SDK execution fails.
         """
-        options = self._build_options(**opts)
         final_text: str | None = None
         turn_number = 0
 
         try:
             if self.runtime is not None:
                 async for event in self.runtime.stream(prompt):
+                    if isinstance(event, TextEvent):
+                        await self._log_step("assistant_message", 0, {"text": event.text})
+                    elif isinstance(event, DoneEvent):
+                        await self._log_step("turn_complete", 0, {})
                     yield event
             else:
+                options = self._build_options(**opts)
                 # Create temporary client (existing behaviour)
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
