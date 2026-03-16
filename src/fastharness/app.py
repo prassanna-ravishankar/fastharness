@@ -136,6 +136,11 @@ class FastHarness:
             output_format=output_format,
         )
         agent = Agent(config=config, func=func)
+        if name in self._agents:
+            logger.warning(
+                "Replacing existing agent with same name",
+                extra={"agent_name": name},
+            )
         self._agents[name] = agent
         self._app = None  # Invalidate cached app
         logger.info(
@@ -257,6 +262,8 @@ class FastHarness:
 
     def _create_app(self) -> "FastAPI":
         """Create the FastAPI application with native A2A SDK."""
+        if not self._agents:
+            logger.warning("Creating app with no registered agents")
         registry = AgentRegistry(agents=self._agents)
 
         # Create AgentCard
