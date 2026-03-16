@@ -15,6 +15,7 @@ from a2a.types import Artifact, DataPart, Message, Part, Role, TextPart
 # ---------------------------------------------------------------------------
 
 _TEXT_PART_NEEDS_KIND = "kind" in TextPart.model_fields
+_DATA_PART_NEEDS_KIND = "kind" in DataPart.model_fields
 
 
 def _text_part(text: str) -> Part:
@@ -26,7 +27,7 @@ def _text_part(text: str) -> Part:
 
 def _data_part(data: dict[str, Any]) -> Part:
     kwargs: dict[str, Any] = {"data": data}
-    if _TEXT_PART_NEEDS_KIND:  # DataPart follows same pattern
+    if _DATA_PART_NEEDS_KIND:
         kwargs["kind"] = "data"
     return Part(root=DataPart(**kwargs))
 

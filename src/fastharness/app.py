@@ -326,14 +326,14 @@ class FastHarness:
 
         # Start runtime factory cleanup task
         if hasattr(self, "_executor"):
-            await self._executor._runtime_factory.start_cleanup_task()
+            await self._executor.runtime_factory.start_cleanup_task()
 
         try:
             yield
         finally:
             # Shutdown runtime factory on app shutdown
             if hasattr(self, "_executor"):
-                await self._executor._runtime_factory.shutdown()
+                await self._executor.runtime_factory.shutdown()
 
     @property
     def app(self) -> "FastAPI":

@@ -249,7 +249,7 @@ class TestFastHarness:
             skills=[Skill(id="help", name="Help", description="Help")],
         )
         _ = harness.app  # triggers executor creation
-        assert harness._executor._runtime_factory is mock_factory
+        assert harness._executor.runtime_factory is mock_factory
 
     def test_duplicate_agent_name_replaces(self) -> None:
         harness = FastHarness(name="test")

@@ -129,7 +129,7 @@ class TestClaudeExecutorRuntimeFactory:
             agent_registry=registry,
             task_store=InMemoryTaskStore(),
         )
-        assert isinstance(executor._runtime_factory, ClaudeRuntimeFactory)
+        assert isinstance(executor.runtime_factory, ClaudeRuntimeFactory)
 
     def test_custom_runtime_factory(self) -> None:
         """Executor uses injected runtime factory when provided."""
@@ -148,7 +148,7 @@ class TestClaudeExecutorRuntimeFactory:
             task_store=InMemoryTaskStore(),
             runtime_factory=mock_factory,
         )
-        assert executor._runtime_factory is mock_factory
+        assert executor.runtime_factory is mock_factory
 
 
 class TestClaudeExecutorTaskTracking:

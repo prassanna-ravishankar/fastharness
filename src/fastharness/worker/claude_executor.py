@@ -1,6 +1,7 @@
 """ClaudeAgentExecutor - Claude SDK integration with native A2A AgentExecutor."""
 
 import asyncio
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,7 @@ from a2a.types import (
 from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
+from fastharness.core.event import DoneEvent, TextEvent
 from fastharness.logging import get_logger
 from fastharness.runtime.base import AgentRuntimeFactory
 from fastharness.worker import converter
@@ -133,14 +135,12 @@ class ClaudeAgentExecutor(AgentExecutor):
     runtime_factory: AgentRuntimeFactory | None = None
 
     def __post_init__(self) -> None:
-        """Initialize task tracking and runtime factory."""
+        """Initialize task tracking and resolve runtime factory."""
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
-        if self.runtime_factory is not None:
-            self._runtime_factory: AgentRuntimeFactory = self.runtime_factory
-        else:
+        if self.runtime_factory is None:
             from fastharness.runtime.claude import ClaudeRuntimeFactory
 
-            self._runtime_factory = ClaudeRuntimeFactory(ttl_minutes=15)
+            self.runtime_factory = ClaudeRuntimeFactory(ttl_minutes=15)
 
     def build_message_history(self, history: list[Message]) -> list[Any]:
         """Convert A2A message history to Claude SDK format."""
@@ -304,7 +304,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             # Get or create a runtime scoped to user+context
             config = agent.config
             pool_key = f"{_get_user_id(context)}:{context_id}"
-            runtime = await self._runtime_factory.get_or_create(pool_key, config)
+            runtime = await self.runtime_factory.get_or_create(pool_key, config)
 
             # Build HarnessClient with runtime
             client = HarnessClient(
@@ -358,7 +358,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             )
 
             # Cleanup runtime on task failure
-            await self._runtime_factory.remove(f"{_get_user_id(context)}:{context_id}")
+            await self.runtime_factory.remove(f"{_get_user_id(context)}:{context_id}")
 
             try:
                 if context.current_task:
@@ -413,9 +413,6 @@ class ClaudeAgentExecutor(AgentExecutor):
         event_queue: EventQueue,
     ) -> None:
         """Stream agent execution, emitting A2A artifact updates as tokens arrive."""
-        import uuid
-
-        from fastharness.core.event import DoneEvent, TextEvent
 
         artifact_id = str(uuid.uuid4())
         full_text = ""
@@ -516,7 +513,7 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # Cleanup runtime on task cancellation
         if context.context_id:
-            await self._runtime_factory.remove(f"{_get_user_id(context)}:{context.context_id}")
+            await self.runtime_factory.remove(f"{_get_user_id(context)}:{context.context_id}")
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)

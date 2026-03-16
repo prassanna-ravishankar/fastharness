@@ -107,10 +107,19 @@ class BaseSessionFactory:
             self._log.info("Created new session", extra={"session_key": session_key})
             return self._build_runtime(entry)
 
+    async def _close_entry(self, entry: SessionEntry) -> None:
+        """Close the runtime associated with a session entry."""
+        try:
+            runtime = self._build_runtime(entry)
+            await runtime.aclose()
+        except Exception:
+            self._log.exception("Error closing runtime")
+
     async def remove(self, session_key: str) -> None:
         async with self._lock:
             entry = self._sessions.pop(session_key, None)
             if entry:
+                await self._close_entry(entry)
                 self._log.info("Removed session", extra={"session_key": session_key})
 
     async def start_cleanup_task(self) -> None:
@@ -128,6 +137,8 @@ class BaseSessionFactory:
 
         async with self._lock:
             self._log.info("Shutting down sessions", extra={"count": len(self._sessions)})
+            for entry in self._sessions.values():
+                await self._close_entry(entry)
             self._sessions.clear()
 
     async def _cleanup_loop(self) -> None:
@@ -141,7 +152,8 @@ class BaseSessionFactory:
                         if v.is_stale(self._ttl_minutes)
                     ]
                     for key in stale:
-                        self._sessions.pop(key)
+                        entry = self._sessions.pop(key)
+                        await self._close_entry(entry)
                         self._log.info(
                             "Cleaned up stale session", extra={"session_key": key}
                         )
