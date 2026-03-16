@@ -12,14 +12,13 @@ from a2a.client import A2AClient
 from a2a.types import Message as A2AMessage
 from a2a.types import (
     MessageSendParams,
-    Part,
     Role,
     SendMessageRequest,
     SendStreamingMessageRequest,
 )
 
 from fastharness.logging import get_logger
-from fastharness.worker.converter import _text_part
+from fastharness.worker.converter import MessageConverter, _text_part
 
 logger = get_logger("a2a_client")
 
@@ -141,7 +140,7 @@ class FastHarnessClient:
                 continue
             # Artifact update — extract text chunks
             if hasattr(event, "artifact"):
-                chunk = _extract_text(event.artifact.parts)
+                chunk = MessageConverter.extract_text_from_parts(event.artifact.parts)
                 if chunk:
                     yield chunk
 
@@ -159,30 +158,20 @@ def _extract_response_text(result: Any) -> str:
 
     # Message response — has parts directly
     if hasattr(result, "parts") and result.parts:
-        return _extract_text(result.parts)
+        return MessageConverter.extract_text_from_parts(result.parts)
 
     # Task response — check artifacts first, then history
     if hasattr(result, "artifacts") and result.artifacts:
         for artifact in result.artifacts:
-            text_out = _extract_text(artifact.parts)
+            text_out = MessageConverter.extract_text_from_parts(artifact.parts)
             if text_out:
                 return text_out
 
     if hasattr(result, "history") and result.history:
         for hist_msg in reversed(result.history):
             if hist_msg.role == Role.agent:
-                return _extract_text(hist_msg.parts)
+                return MessageConverter.extract_text_from_parts(hist_msg.parts)
 
     return ""
 
 
-def _extract_text(parts: list[Part] | None) -> str:
-    """Extract text from A2A parts."""
-    if not parts:
-        return ""
-    texts = []
-    for part in parts:
-        actual = part.root if hasattr(part, "root") else part
-        if hasattr(actual, "text"):
-            texts.append(actual.text)
-    return "".join(texts)

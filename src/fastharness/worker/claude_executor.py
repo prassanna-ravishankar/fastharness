@@ -415,7 +415,7 @@ class ClaudeAgentExecutor(AgentExecutor):
         """Stream agent execution, emitting A2A artifact updates as tokens arrive."""
 
         artifact_id = str(uuid.uuid4())
-        full_text = ""
+        chunks: list[str] = []
         chunk_count = 0
 
         async for event in client.stream(prompt):
@@ -427,7 +427,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 continue
             if isinstance(event, TextEvent):
                 chunk_count += 1
-                full_text += event.text
+                chunks.append(event.text)
                 # Emit incremental artifact update
                 chunk_artifact = Artifact(
                     artifact_id=artifact_id,
@@ -443,7 +443,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                     )
                 )
             elif isinstance(event, DoneEvent):
-                final_text = event.final_text or full_text
+                final_text = event.final_text or "".join(chunks)
                 # Emit last-chunk artifact marker
                 final_artifact = Artifact(
                     artifact_id=artifact_id,
@@ -478,7 +478,9 @@ class ClaudeAgentExecutor(AgentExecutor):
 
         # If stream ended without DoneEvent (shouldn't happen, but handle it)
         if task.status.state != TaskState.completed:
-            await self._complete_task(task, full_text, task_id, context_id, event_queue)
+            await self._complete_task(
+                task, "".join(chunks), task_id, context_id, event_queue
+            )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel a running task."""
