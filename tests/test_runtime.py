@@ -439,3 +439,51 @@ class TestHarnessClientRuntimeIntegration:
         assert len(events) == 2
         assert isinstance(events[0], TextEvent)
         assert isinstance(events[1], DoneEvent)
+
+    @pytest.mark.asyncio
+    async def test_run_wraps_runtime_error(self) -> None:
+        mock_runtime = AsyncMock(spec=AgentRuntime)
+        mock_runtime.run = AsyncMock(side_effect=ValueError("boom"))
+
+        from fastharness import HarnessClient
+
+        client = HarnessClient(runtime=mock_runtime)
+        with pytest.raises(RuntimeError, match="Agent execution failed.*boom"):
+            await client.run("test")
+
+    @pytest.mark.asyncio
+    async def test_stream_wraps_runtime_error(self) -> None:
+        async def failing_stream(prompt: str) -> AsyncIterator[Event]:
+            raise ConnectionError("network down")
+            yield  # type: ignore[misc]  # make it a generator
+
+        mock_runtime = MagicMock(spec=AgentRuntime)
+        mock_runtime.stream = failing_stream
+
+        from fastharness import HarnessClient
+
+        client = HarnessClient(runtime=mock_runtime)
+        with pytest.raises(RuntimeError, match="Agent streaming failed.*network down"):
+            async for _ in client.stream("test"):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_run_step_logging_with_runtime(self) -> None:
+        """Verify step logger fires when using a runtime."""
+        mock_runtime = AsyncMock(spec=AgentRuntime)
+        mock_runtime.run = AsyncMock(return_value="logged result")
+
+
+        from fastharness import HarnessClient
+
+        mock_logger = AsyncMock()
+
+        client = HarnessClient(runtime=mock_runtime, step_logger=mock_logger)
+        await client.run("test")
+
+        # Should have logged assistant_message + turn_complete
+        assert mock_logger.log_step.call_count == 2
+        first_call = mock_logger.log_step.call_args_list[0]
+        assert first_call[0][0].step_type == "assistant_message"
+        second_call = mock_logger.log_step.call_args_list[1]
+        assert second_call[0][0].step_type == "turn_complete"
