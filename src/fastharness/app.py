@@ -273,7 +273,7 @@ class FastHarness:
             version=self.version,
             url=self.url,
             skills=self._collect_all_skills(),
-            capabilities=AgentCapabilities(),  # Default capabilities
+            capabilities=AgentCapabilities(streaming=True),
             default_input_modes=["text"],  # Default to text input
             default_output_modes=["text"],  # Default to text output
         )

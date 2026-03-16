@@ -129,6 +129,30 @@ curl -X POST http://localhost:8000/ \
   }'
 ```
 
+**4. Stream responses (SSE):**
+
+Default agents stream tokens as they arrive via `message/sendStream`:
+
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "message/sendStream",
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"kind": "text", "text": "Hello!"}],
+        "messageId": "msg-1"
+      }
+    },
+    "id": 1
+  }'
+```
+
+Each text chunk arrives as a `TaskArtifactUpdateEvent` with `append: true`, followed by `last_chunk: true` when complete.
+
 ## Runtime Backends
 
 FastHarness uses an `AgentRuntime` / `AgentRuntimeFactory` protocol system that decouples agent execution from any specific SDK. You can swap backends without changing your agent definitions.
