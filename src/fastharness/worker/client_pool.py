@@ -83,9 +83,8 @@ class ClientPool:
         Returns:
             Tuple of (client, is_new) where is_new indicates if a new client was created
         """
+        options_hash = _hash_options(options)
         async with self._lock:
-            options_hash = _hash_options(options)
-
             # Check if we have an existing client for this context
             if context_id in self._pool:
                 entry = self._pool[context_id]

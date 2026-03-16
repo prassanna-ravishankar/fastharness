@@ -231,6 +231,47 @@ class TestFastHarness:
         # App should be cached
         assert harness.app is app
 
+    def test_runtime_factory_stored(self) -> None:
+        from unittest.mock import MagicMock
+
+        mock_factory = MagicMock()
+        harness = FastHarness(name="test", runtime_factory=mock_factory)
+        assert harness._runtime_factory is mock_factory
+
+    def test_runtime_factory_passed_to_executor(self) -> None:
+        from unittest.mock import MagicMock
+
+        mock_factory = MagicMock()
+        harness = FastHarness(name="test", runtime_factory=mock_factory)
+        harness.agent(
+            name="assistant",
+            description="Test",
+            skills=[Skill(id="help", name="Help", description="Help")],
+        )
+        _ = harness.app  # triggers executor creation
+        assert harness._executor.runtime_factory is mock_factory
+
+    def test_duplicate_agent_name_replaces(self) -> None:
+        harness = FastHarness(name="test")
+        harness.agent(
+            name="helper",
+            description="First",
+            skills=[Skill(id="s1", name="S1", description="d")],
+        )
+        harness.agent(
+            name="helper",
+            description="Second",
+            skills=[Skill(id="s2", name="S2", description="d")],
+        )
+        # Second registration wins
+        assert harness._agents["helper"].config.description == "Second"
+        assert len(harness._agents) == 1
+
+    def test_app_without_agents_still_works(self) -> None:
+        harness = FastHarness(name="empty")
+        app = harness.app
+        assert app is not None
+
 
 class TestMessageConverter:
     """Tests for MessageConverter."""

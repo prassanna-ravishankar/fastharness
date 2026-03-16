@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -17,6 +17,9 @@ from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.logging import get_logger
 from fastharness.step_logger import StepEvent, StepLogger, StepType
 from fastharness.telemetry import ExecutionMetrics, TelemetryCallback
+
+if TYPE_CHECKING:
+    from fastharness.runtime.base import AgentRuntime
 
 logger = get_logger("client")
 
@@ -43,7 +46,7 @@ class HarnessClient:
     output_format: dict[str, Any] | None = None
     telemetry_callbacks: list[TelemetryCallback] = field(default_factory=list)
     step_logger: StepLogger | None = None
-    pooled_client: ClaudeSDKClient | None = None
+    runtime: "AgentRuntime | None" = None
 
     def _build_options(self, **overrides: Any) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions, merging client config with overrides.
@@ -79,18 +82,41 @@ class HarnessClient:
 
         usage = getattr(result_msg, "usage", None)
         usage_dict = usage if isinstance(usage, dict) else {}
+        await self._emit_telemetry_from_metrics(
+            {
+                "total_cost_usd": getattr(result_msg, "total_cost_usd", None),
+                "input_tokens": usage_dict.get("input_tokens"),
+                "output_tokens": usage_dict.get("output_tokens"),
+                "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens"),
+                "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens"),
+                "duration_ms": getattr(result_msg, "duration_ms", 0),
+                "duration_api_ms": getattr(result_msg, "duration_api_ms", 0),
+                "num_turns": getattr(result_msg, "num_turns", 1),
+                "session_id": getattr(result_msg, "session_id", "unknown"),
+                "is_error": getattr(result_msg, "is_error", False),
+            },
+            task_id=task_id,
+        )
+
+    async def _emit_telemetry_from_metrics(
+        self, raw: dict[str, Any], task_id: str = "unknown"
+    ) -> None:
+        """Build ExecutionMetrics from a dict and notify callbacks."""
+        if not self.telemetry_callbacks:
+            return
+
         metrics = ExecutionMetrics(
             task_id=task_id,
-            session_id=getattr(result_msg, "session_id", "unknown"),
-            total_cost_usd=getattr(result_msg, "total_cost_usd", None),
-            input_tokens=usage_dict.get("input_tokens"),
-            output_tokens=usage_dict.get("output_tokens"),
-            cache_read_tokens=usage_dict.get("cache_read_input_tokens"),
-            cache_write_tokens=usage_dict.get("cache_creation_input_tokens"),
-            duration_ms=getattr(result_msg, "duration_ms", 0),
-            duration_api_ms=getattr(result_msg, "duration_api_ms", 0),
-            num_turns=getattr(result_msg, "num_turns", 1),
-            status="error" if getattr(result_msg, "is_error", False) else "success",
+            session_id=raw.get("session_id", "unknown"),
+            total_cost_usd=raw.get("total_cost_usd"),
+            input_tokens=raw.get("input_tokens"),
+            output_tokens=raw.get("output_tokens"),
+            cache_read_tokens=raw.get("cache_read_input_tokens"),
+            cache_write_tokens=raw.get("cache_creation_input_tokens"),
+            duration_ms=raw.get("duration_ms", 0),
+            duration_api_ms=raw.get("duration_api_ms", 0),
+            num_turns=raw.get("num_turns", 1),
+            status="error" if raw.get("is_error") else "success",
             timestamp=datetime.now(UTC),
         )
 
@@ -165,31 +191,25 @@ class HarnessClient:
         Raises:
             RuntimeError: If Claude Agent SDK execution fails.
         """
-        options = self._build_options(**opts)
         final_text = ""
         structured_output: Any = None
         turn_number = 0
 
         try:
-            if self.pooled_client:
-                # Use pooled client directly (no context manager)
-                client = self.pooled_client
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, TextBlock):
-                                final_text = block.text
-                        await self._log_assistant_blocks(message.content, turn_number)
-                    elif isinstance(message, ResultMessage):
-                        await self._log_turn_complete(message, turn_number)
-                        if message.result:
-                            final_text = message.result
-                        structured_output = getattr(message, "structured_output", None)
-                        turn_number += 1
+            if self.runtime is not None:
+                # Delegate through stream() to capture DoneEvent metrics
+                async for event in self.stream(prompt):
+                    if isinstance(event, DoneEvent):
+                        if event.structured_output is not None:
+                            structured_output = event.structured_output
+                        elif event.final_text:
+                            final_text = event.final_text
                         break
+                    elif isinstance(event, TextEvent):
+                        final_text = event.text
             else:
-                # Create temporary client (existing behavior)
+                options = self._build_options(**opts)
+                # Create temporary client (existing behaviour)
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
                     async for message in client.receive_response():
@@ -230,39 +250,39 @@ class HarnessClient:
         Raises:
             RuntimeError: If Claude SDK execution fails.
         """
-        options = self._build_options(**opts)
         final_text: str | None = None
         turn_number = 0
 
         try:
-            if self.pooled_client:
-                # Use pooled client directly (no context manager)
-                client = self.pooled_client
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage):
-                        await self._log_assistant_blocks(message.content, turn_number)
-                        for block in message.content:
-                            if isinstance(block, TextBlock):
-                                final_text = block.text
-                                yield TextEvent(text=block.text)
-                            elif hasattr(block, "name") and hasattr(block, "input"):
-                                yield ToolEvent(
-                                    tool_name=getattr(block, "name", ""),
-                                    tool_input=getattr(block, "input", {}),
-                                )
-                    elif isinstance(message, ResultMessage):
-                        await self._log_turn_complete(message, turn_number)
-                        if message.result:
-                            final_text = message.result
-                        yield DoneEvent(
-                            final_text=final_text,
-                            structured_output=getattr(message, "structured_output", None),
+            if self.runtime is not None:
+                async for event in self.runtime.stream(prompt):
+                    if isinstance(event, TextEvent):
+                        await self._log_step("assistant_message", 0, {"text": event.text})
+                    elif isinstance(event, ToolEvent):
+                        await self._log_step(
+                            "tool_call",
+                            0,
+                            {"name": event.tool_name, "input": event.tool_input},
                         )
-                        turn_number += 1
-                        break
+                    elif isinstance(event, DoneEvent):
+                        await self._log_step(
+                            "turn_complete",
+                            0,
+                            {
+                                "cost_usd": event.metrics.get("total_cost_usd"),
+                                "usage": {
+                                    k: v
+                                    for k, v in event.metrics.items()
+                                    if k.endswith("_tokens")
+                                }
+                                or None,
+                            },
+                        )
+                        await self._emit_telemetry_from_metrics(event.metrics)
+                    yield event
             else:
-                # Create temporary client (existing behavior)
+                options = self._build_options(**opts)
+                # Create temporary client (existing behaviour)
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
                     async for message in client.receive_response():

@@ -232,3 +232,7 @@ class TestExtractTextFromParts:
     def test_empty_parts(self) -> None:
         result = MessageConverter.extract_text_from_parts([])
         assert result == ""
+
+    def test_none_parts(self) -> None:
+        result = MessageConverter.extract_text_from_parts(None)
+        assert result == ""

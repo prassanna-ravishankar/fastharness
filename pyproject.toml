@@ -1,7 +1,7 @@
 [project]
 name = "fastharness"
-version = "1.0.0"
-description = "Wrap Claude Agent SDK and expose agents as A2A-compliant FastAPI services"
+version = "1.1.0"
+description = "Expose AI agents as A2A-compliant FastAPI services with pluggable runtime backends"
 readme = "README.md"
 authors = [
     { name = "Prass, The Nomadic Coder", email = "atemysemicolon@gmail.com" }
@@ -9,14 +9,22 @@ authors = [
 requires-python = ">=3.11"
 dependencies = [
     "claude-agent-sdk>=0.1.0",
-    "a2a-sdk>=0.3.0",
+    "a2a-sdk>=0.3.25",
     "fastapi>=0.115.0",
     "pydantic>=2.0.0",
     "uvicorn>=0.30.0",
     "anyio>=4.0.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
+openhands = [
+    "openhands-sdk>=0.1.0; python_version >= '3.12'",
+]
+deepagents = [
+    "pydantic-deep>=0.1.0",
+    "pydantic-ai-backend>=0.1.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
@@ -42,6 +50,9 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/fastharness/__init__.py" = ["E402"]  # load_dotenv() must run before other imports
 
 [tool.ty.environment]
 python-version = "3.11"

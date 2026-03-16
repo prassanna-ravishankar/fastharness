@@ -1,6 +1,7 @@
 """ClaudeAgentExecutor - Claude SDK integration with native A2A AgentExecutor."""
 
 import asyncio
+import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -8,13 +9,23 @@ from a2a.server.agent_execution.agent_executor import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_store import TaskStore
-from a2a.types import Artifact, Message, Role, Task, TaskState, TaskStatus
+from a2a.types import (
+    Artifact,
+    Message,
+    Role,
+    Task,
+    TaskArtifactUpdateEvent,
+    TaskState,
+    TaskStatus,
+)
 
 from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
+from fastharness.core.event import DoneEvent, TextEvent, ToolEvent
 from fastharness.logging import get_logger
-from fastharness.worker.client_pool import ClientPool
+from fastharness.runtime.base import AgentRuntimeFactory
+from fastharness.worker import converter
 from fastharness.worker.converter import MessageConverter
 
 if TYPE_CHECKING:
@@ -36,7 +47,7 @@ class HarnessRequestMetadata:
     @classmethod
     def from_context(cls, context: RequestContext) -> "HarnessRequestMetadata":
         """Extract FastHarness extension fields from a RequestContext."""
-        raw = context.metadata
+        raw = context.metadata or {}
         return cls(
             skill_id=str(raw["skill_id"]) if raw.get("skill_id") else None,
         )
@@ -121,11 +132,15 @@ class ClaudeAgentExecutor(AgentExecutor):
 
     agent_registry: AgentRegistry
     task_store: TaskStore
+    runtime_factory: AgentRuntimeFactory | None = None
 
     def __post_init__(self) -> None:
-        """Initialize task tracking and client pool."""
+        """Initialize task tracking and resolve runtime factory."""
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
-        self._client_pool = ClientPool(ttl_minutes=15)
+        if self.runtime_factory is None:
+            from fastharness.runtime.claude import ClaudeRuntimeFactory
+
+            self.runtime_factory = ClaudeRuntimeFactory(ttl_minutes=15)
 
     def build_message_history(self, history: list[Message]) -> list[Any]:
         """Convert A2A message history to Claude SDK format."""
@@ -214,7 +229,6 @@ class ClaudeAgentExecutor(AgentExecutor):
                 current_task = Task(
                     id=task_id,
                     context_id=context_id,
-                    kind="task",
                     status=TaskStatus(state=TaskState.working),
                     history=[message],
                     artifacts=[],
@@ -287,39 +301,12 @@ class ClaudeAgentExecutor(AgentExecutor):
                 message_history=message_history,
             )
 
-            # Build ClaudeAgentOptions from agent config
-            from typing import Literal, cast
-
-            from claude_agent_sdk import ClaudeAgentOptions
-
+            # Get or create a runtime scoped to user+context
             config = agent.config
-            options = ClaudeAgentOptions(
-                system_prompt=config.system_prompt,
-                allowed_tools=config.tools,
-                model=config.model,
-                max_turns=config.max_turns,
-                mcp_servers=config.mcp_servers,
-                setting_sources=cast(
-                    list[Literal["user", "project", "local"]] | None, config.setting_sources
-                ),
-                output_format=config.output_format,
-                permission_mode="bypassPermissions",
-            )
-
-            # Pool key scoped to user+context to isolate sessions between users
             pool_key = f"{_get_user_id(context)}:{context_id}"
-            pooled_client, is_new = await self._client_pool.get_or_create(pool_key, options)
-            logger.info(
-                "Retrieved pooled client",
-                extra={
-                    "pool_key": pool_key,
-                    "context_id": context_id,
-                    "is_new": is_new,
-                    "pool_size": len(self._client_pool._pool),
-                },
-            )
+            runtime = await self.runtime_factory.get_or_create(pool_key, config)
 
-            # Build HarnessClient with pooled SDK client
+            # Build HarnessClient with runtime
             client = HarnessClient(
                 system_prompt=config.system_prompt,
                 tools=config.tools,
@@ -328,44 +315,36 @@ class ClaudeAgentExecutor(AgentExecutor):
                 mcp_servers=config.mcp_servers,
                 setting_sources=config.setting_sources,
                 output_format=config.output_format,
-                pooled_client=pooled_client,
+                runtime=runtime,
             )
 
             # Execute agent
-            execution_mode = "custom" if agent.func is not None else "default"
-            logger.debug(
-                f"Executing {execution_mode} agent run",
-                extra={"task_id": task_id, "agent_name": agent.config.name},
-            )
-
             if agent.func is not None:
+                # Custom loop — run() only, loop controls execution
+                logger.debug(
+                    "Executing custom agent run",
+                    extra={"task_id": task_id, "agent_name": agent.config.name},
+                )
                 result = await agent.func(prompt, ctx, client)
+                await self._complete_task(
+                    current_task, result, task_id, context_id, event_queue
+                )
             else:
-                result = await client.run(prompt)
-
-            # Convert result to artifacts and response message
-            artifacts = self.build_artifacts(result)
-            response_message = MessageConverter.claude_to_a2a_message(
-                role="assistant",
-                content=result if isinstance(result, str) else str(result),
-            )
-
-            # Update task with results (only the assistant's response; user message
-            # is already in history)
-            task_history = _ensure_history(current_task)
-            task_history.append(response_message)
-
-            current_task.status = TaskStatus(state=TaskState.completed)
-            current_task.artifacts = artifacts
-            await self.task_store.save(current_task)
-            await event_queue.enqueue_event(response_message)
-
-            # Don't cleanup pooled client on task completion - let TTL handle it
-            # This allows multi-turn conversations within the same context
+                # Default agent — stream tokens as A2A artifact updates
+                logger.debug(
+                    "Executing streaming agent run",
+                    extra={"task_id": task_id, "agent_name": agent.config.name},
+                )
+                await self._stream_task(
+                    current_task, client, prompt, task_id, context_id, event_queue
+                )
 
             logger.info(
                 "Task completed successfully",
-                extra={"task_id": task_id, "artifact_count": len(artifacts)},
+                extra={
+                    "task_id": task_id,
+                    "artifact_count": len(current_task.artifacts or []),
+                },
             )
 
         except Exception as e:
@@ -378,8 +357,8 @@ class ClaudeAgentExecutor(AgentExecutor):
                 },
             )
 
-            # Cleanup pooled client on task failure
-            await self._client_pool.remove(f"{_get_user_id(context)}:{context_id}")
+            # Cleanup runtime on task failure
+            await self.runtime_factory.remove(f"{_get_user_id(context)}:{context_id}")
 
             try:
                 if context.current_task:
@@ -400,6 +379,108 @@ class ClaudeAgentExecutor(AgentExecutor):
                     "Failed to update task to failed state",
                     extra={"task_id": task_id},
                 )
+
+    async def _complete_task(
+        self,
+        task: Task,
+        result: Any,
+        task_id: str,
+        context_id: str,
+        event_queue: EventQueue,
+    ) -> None:
+        """Finalize a task with a complete result (used by custom loops)."""
+        artifacts = self.build_artifacts(result)
+        response_message = MessageConverter.claude_to_a2a_message(
+            role="assistant",
+            content=result if isinstance(result, str) else str(result),
+        )
+
+        task_history = _ensure_history(task)
+        task_history.append(response_message)
+
+        task.status = TaskStatus(state=TaskState.completed)
+        task.artifacts = artifacts
+        await self.task_store.save(task)
+        await event_queue.enqueue_event(response_message)
+
+    async def _stream_task(
+        self,
+        task: Task,
+        client: HarnessClient,
+        prompt: str,
+        task_id: str,
+        context_id: str,
+        event_queue: EventQueue,
+    ) -> None:
+        """Stream agent execution, emitting A2A artifact updates as tokens arrive."""
+
+        artifact_id = str(uuid.uuid4())
+        chunks: list[str] = []
+        chunk_count = 0
+
+        async for event in client.stream(prompt):
+            if isinstance(event, ToolEvent):
+                logger.debug(
+                    "Tool call during stream",
+                    extra={"tool_name": event.tool_name, "task_id": task_id},
+                )
+                continue
+            if isinstance(event, TextEvent):
+                chunk_count += 1
+                chunks.append(event.text)
+                # Emit incremental artifact update
+                chunk_artifact = Artifact(
+                    artifact_id=artifact_id,
+                    name="response",
+                    parts=[converter._text_part(event.text)],
+                )
+                await event_queue.enqueue_event(
+                    TaskArtifactUpdateEvent(
+                        task_id=task_id,
+                        context_id=context_id,
+                        artifact=chunk_artifact,
+                        append=chunk_count > 1,
+                    )
+                )
+            elif isinstance(event, DoneEvent):
+                final_text = event.final_text or "".join(chunks)
+                # Emit last-chunk artifact marker
+                final_artifact = Artifact(
+                    artifact_id=artifact_id,
+                    name="response",
+                    parts=[converter._text_part("")],
+                )
+                await event_queue.enqueue_event(
+                    TaskArtifactUpdateEvent(
+                        task_id=task_id,
+                        context_id=context_id,
+                        artifact=final_artifact,
+                        append=True,
+                        last_chunk=True,
+                    )
+                )
+
+                # Finalize task state
+                response_message = MessageConverter.claude_to_a2a_message(
+                    role="assistant", content=final_text
+                )
+                task_history = _ensure_history(task)
+                task_history.append(response_message)
+
+                complete_artifact = MessageConverter.text_to_artifact(final_text)
+                task.status = TaskStatus(state=TaskState.completed)
+                task.artifacts = [complete_artifact]
+                await self.task_store.save(task)
+
+                # Emit the Message — required for message/send compatibility
+                await event_queue.enqueue_event(response_message)
+                break
+
+        # If stream ended without DoneEvent (shouldn't happen, but handle it)
+        if task.status.state != TaskState.completed:
+            await self._complete_task(
+                task, "".join(chunks), task_id, context_id, event_queue
+            )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel a running task."""
@@ -438,9 +519,9 @@ class ClaudeAgentExecutor(AgentExecutor):
         if not current_task:
             return
 
-        # Cleanup pooled client on task cancellation
+        # Cleanup runtime on task cancellation
         if context.context_id:
-            await self._client_pool.remove(f"{_get_user_id(context)}:{context.context_id}")
+            await self.runtime_factory.remove(f"{_get_user_id(context)}:{context.context_id}")
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)

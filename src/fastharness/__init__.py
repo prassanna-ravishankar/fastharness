@@ -1,5 +1,10 @@
 """FastHarness - Wrap Claude Agent SDK and expose agents as A2A-compliant FastAPI services."""
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env before anything that reads os.environ
+
+from fastharness.a2a_client import FastHarnessClient
 from fastharness.app import FastHarness
 from fastharness.client import HarnessClient
 from fastharness.core.agent import Agent, AgentConfig
@@ -7,16 +12,19 @@ from fastharness.core.context import AgentContext, Message
 from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.core.response import AgentResponse, Artifact
 from fastharness.core.skill import Skill
+from fastharness.runtime.base import AgentRuntime, AgentRuntimeFactory
+from fastharness.runtime.claude import ClaudeRuntimeFactory
 from fastharness.step_logger import ConsoleStepLogger, StepEvent, StepLogger
 from fastharness.telemetry import CostTracker, ExecutionMetrics, TelemetryCallback
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     # Main class
     "FastHarness",
-    # Client
+    # Clients
     "HarnessClient",
+    "FastHarnessClient",
     # Agent types
     "Agent",
     "AgentConfig",
@@ -33,6 +41,10 @@ __all__ = [
     "Artifact",
     # Skill
     "Skill",
+    # Runtime
+    "AgentRuntime",
+    "AgentRuntimeFactory",
+    "ClaudeRuntimeFactory",
     # Telemetry
     "ExecutionMetrics",
     "TelemetryCallback",

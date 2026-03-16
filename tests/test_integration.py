@@ -69,6 +69,9 @@ async def test_agent_card_endpoint(test_harness: FastHarness) -> None:
     assert data["url"] == "http://testserver"
     assert data["protocolVersion"] == "0.3.0"
 
+    # Verify capabilities
+    assert data["capabilities"]["streaming"] is True
+
     # Verify skills
     assert len(data["skills"]) == 1
     skill = data["skills"][0]
