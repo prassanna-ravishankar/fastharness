@@ -255,6 +255,12 @@ class HarnessClient:
                 async for event in self.runtime.stream(prompt):
                     if isinstance(event, TextEvent):
                         await self._log_step("assistant_message", 0, {"text": event.text})
+                    elif isinstance(event, ToolEvent):
+                        await self._log_step(
+                            "tool_call",
+                            0,
+                            {"name": event.tool_name, "input": event.tool_input},
+                        )
                     elif isinstance(event, DoneEvent):
                         await self._log_step(
                             "turn_complete",

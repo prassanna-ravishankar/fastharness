@@ -22,7 +22,7 @@ from a2a.types import (
 from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
-from fastharness.core.event import DoneEvent, TextEvent
+from fastharness.core.event import DoneEvent, TextEvent, ToolEvent
 from fastharness.logging import get_logger
 from fastharness.runtime.base import AgentRuntimeFactory
 from fastharness.worker import converter
@@ -419,6 +419,12 @@ class ClaudeAgentExecutor(AgentExecutor):
         chunk_count = 0
 
         async for event in client.stream(prompt):
+            if isinstance(event, ToolEvent):
+                logger.debug(
+                    "Tool call during stream",
+                    extra={"tool_name": event.tool_name, "task_id": task_id},
+                )
+                continue
             if isinstance(event, TextEvent):
                 chunk_count += 1
                 full_text += event.text
