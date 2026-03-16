@@ -882,7 +882,7 @@ wheels = [
 
 [[package]]
 name = "fastharness"
-version = "1.0.0"
+version = "1.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk" },
@@ -890,6 +890,7 @@ dependencies = [
     { name = "claude-agent-sdk" },
     { name = "fastapi" },
     { name = "pydantic" },
+    { name = "python-dotenv" },
     { name = "uvicorn" },
 ]
 
@@ -922,6 +923,7 @@ requires-dist = [
     { name = "pydantic-deep", marker = "extra == 'deepagents'", specifier = ">=0.1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "ty", marker = "extra == 'dev'" },
     { name = "uvicorn", specifier = ">=0.30.0" },

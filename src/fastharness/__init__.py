@@ -1,5 +1,9 @@
 """FastHarness - Wrap Claude Agent SDK and expose agents as A2A-compliant FastAPI services."""
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env before anything that reads os.environ
+
 from fastharness.app import FastHarness
 from fastharness.client import HarnessClient
 from fastharness.core.agent import Agent, AgentConfig
@@ -12,7 +16,7 @@ from fastharness.runtime.claude import ClaudeRuntimeFactory
 from fastharness.step_logger import ConsoleStepLogger, StepEvent, StepLogger
 from fastharness.telemetry import CostTracker, ExecutionMetrics, TelemetryCallback
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     # Main class
