@@ -11,13 +11,11 @@ from a2a.server.tasks.task_store import TaskStore
 from a2a.types import (
     Artifact,
     Message,
-    Part,
     Role,
     Task,
     TaskArtifactUpdateEvent,
     TaskState,
     TaskStatus,
-    TextPart,
 )
 
 from fastharness.client import HarnessClient
@@ -25,6 +23,7 @@ from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
 from fastharness.logging import get_logger
 from fastharness.runtime.base import AgentRuntimeFactory
+from fastharness.worker import converter
 from fastharness.worker.converter import MessageConverter
 
 if TYPE_CHECKING:
@@ -230,7 +229,6 @@ class ClaudeAgentExecutor(AgentExecutor):
                 current_task = Task(
                     id=task_id,
                     context_id=context_id,
-                    kind="task",
                     status=TaskStatus(state=TaskState.working),
                     history=[message],
                     artifacts=[],
@@ -431,7 +429,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 chunk_artifact = Artifact(
                     artifact_id=artifact_id,
                     name="response",
-                    parts=[Part(root=TextPart(kind="text", text=event.text))],
+                    parts=[converter._text_part(event.text)],
                 )
                 await event_queue.enqueue_event(
                     TaskArtifactUpdateEvent(
@@ -447,7 +445,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 final_artifact = Artifact(
                     artifact_id=artifact_id,
                     name="response",
-                    parts=[Part(root=TextPart(kind="text", text=""))],
+                    parts=[converter._text_part("")],
                 )
                 await event_queue.enqueue_event(
                     TaskArtifactUpdateEvent(

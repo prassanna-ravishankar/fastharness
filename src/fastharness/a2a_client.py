@@ -16,10 +16,10 @@ from a2a.types import (
     Role,
     SendMessageRequest,
     SendStreamingMessageRequest,
-    TextPart,
 )
 
 from fastharness.logging import get_logger
+from fastharness.worker.converter import _text_part
 
 logger = get_logger("a2a_client")
 
@@ -66,7 +66,7 @@ class FastHarnessClient:
         """Build an A2A Message and optional metadata."""
         msg = A2AMessage(
             role=Role.user,
-            parts=[Part(root=TextPart(kind="text", text=text))],
+            parts=[_text_part(text)],
             message_id=self._next_msg_id(),
             context_id=context_id or str(uuid.uuid4()),
         )

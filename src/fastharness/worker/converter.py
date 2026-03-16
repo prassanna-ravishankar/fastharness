@@ -1,9 +1,49 @@
-"""Message conversion between Claude SDK and A2A protocol."""
+"""Message conversion between Claude SDK and A2A protocol.
+
+A2A type construction is centralized via _make_* helpers so that
+forward-incompatible changes (e.g. removal of the ``kind`` discriminator
+in A2A v1.0) only need updating in one place.
+"""
 
 import uuid
 from typing import Any
 
 from a2a.types import Artifact, DataPart, Message, Part, Role, TextPart
+
+# ---------------------------------------------------------------------------
+# A2A type factories — single place to adapt when the SDK changes
+# ---------------------------------------------------------------------------
+
+_TEXT_PART_NEEDS_KIND = "kind" in TextPart.model_fields
+
+
+def _text_part(text: str) -> Part:
+    kwargs: dict[str, Any] = {"text": text}
+    if _TEXT_PART_NEEDS_KIND:
+        kwargs["kind"] = "text"
+    return Part(root=TextPart(**kwargs))
+
+
+def _data_part(data: dict[str, Any]) -> Part:
+    kwargs: dict[str, Any] = {"data": data}
+    if _TEXT_PART_NEEDS_KIND:  # DataPart follows same pattern
+        kwargs["kind"] = "data"
+    return Part(root=DataPart(**kwargs))
+
+
+_MESSAGE_NEEDS_KIND = "kind" in Message.model_fields
+
+
+def _message(role: Role, parts: list[Part], message_id: str) -> Message:
+    kwargs: dict[str, Any] = {"role": role, "parts": parts, "message_id": message_id}
+    if _MESSAGE_NEEDS_KIND:
+        kwargs["kind"] = "message"
+    return Message(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# Part normalization (reading parts from any source)
+# ---------------------------------------------------------------------------
 
 
 def _normalize_part(part: Any) -> dict[str, Any]:
@@ -12,23 +52,34 @@ def _normalize_part(part: Any) -> dict[str, Any]:
     Handles three input forms:
     - Raw dict (legacy tests): {"kind": "text", "text": "..."}
     - Part union wrapper: Part(root=TextPart(...)) -- unwrap .root first
-    - Pydantic model: TextPart(kind="text", text="...") or DataPart(kind="data", data={...})
+    - Pydantic model: TextPart(text="...") or DataPart(data={...})
+
+    For v1.0 compatibility, detects the part type by checking for
+    characteristic attributes rather than relying on ``kind``.
     """
-    # Unwrap Part union wrapper
     actual = part.root if hasattr(part, "root") else part
 
-    # Already a dict
     if isinstance(actual, dict):
+        # Ensure a synthetic kind for v1.0 dicts that lack it
+        if "kind" not in actual:
+            if "text" in actual:
+                actual = {**actual, "kind": "text"}
+            elif "data" in actual:
+                actual = {**actual, "kind": "data"}
         return actual
 
-    # Pydantic model with .kind attribute -- convert to dict
-    if hasattr(actual, "kind"):
-        result: dict[str, Any] = {"kind": actual.kind}
-        if actual.kind == "text" and hasattr(actual, "text"):
-            result["text"] = actual.text
-        elif actual.kind == "data" and hasattr(actual, "data"):
-            result["data"] = actual.data
-        return result
+    # Pydantic model — detect type by attribute, not kind
+    if hasattr(actual, "text") and isinstance(getattr(actual, "text", None), str):
+        return {"kind": "text", "text": actual.text}
+    if hasattr(actual, "data"):
+        return {"kind": "data", "data": actual.data}
+
+    # Fall back to kind if present (0.3.x compat)
+    kind = getattr(actual, "kind", None)
+    if kind == "text" and hasattr(actual, "text"):
+        return {"kind": "text", "text": actual.text}
+    if kind == "data" and hasattr(actual, "data"):
+        return {"kind": "data", "data": actual.data}
 
     return {}
 
@@ -43,34 +94,28 @@ class MessageConverter:
 
         for block in content:
             if hasattr(block, "text"):
-                parts.append(Part(root=TextPart(kind="text", text=block.text)))
+                parts.append(_text_part(block.text))
             elif hasattr(block, "name") and hasattr(block, "input"):
                 parts.append(
-                    Part(
-                        root=DataPart(
-                            kind="data",
-                            data={
-                                "tool_use": {
-                                    "id": getattr(block, "id", ""),
-                                    "name": block.name,
-                                    "input": block.input,
-                                }
-                            },
-                        )
+                    _data_part(
+                        {
+                            "tool_use": {
+                                "id": getattr(block, "id", ""),
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        }
                     )
                 )
             elif hasattr(block, "tool_use_id") and hasattr(block, "content"):
                 parts.append(
-                    Part(
-                        root=DataPart(
-                            kind="data",
-                            data={
-                                "tool_result": {
-                                    "tool_use_id": block.tool_use_id,
-                                    "content": block.content,
-                                }
-                            },
-                        )
+                    _data_part(
+                        {
+                            "tool_result": {
+                                "tool_use_id": block.tool_use_id,
+                                "content": block.content,
+                            }
+                        }
                     )
                 )
 
@@ -83,24 +128,16 @@ class MessageConverter:
     ) -> Message:
         """Convert a Claude SDK message to A2A Message."""
         if isinstance(content, str):
-            parts: list[Part] = [Part(root=TextPart(kind="text", text=content))]
+            parts: list[Part] = [_text_part(content)]
         else:
             parts = MessageConverter.claude_to_a2a_parts(content)
 
         a2a_role = Role.agent if role == "assistant" else Role.user
-        return Message(
-            role=a2a_role,
-            parts=parts,
-            kind="message",
-            message_id=str(uuid.uuid4()),
-        )
+        return _message(a2a_role, parts, str(uuid.uuid4()))
 
     @staticmethod
     def _convert_data_part(data: dict[str, Any]) -> dict[str, Any] | None:
-        """Convert a data part's payload to Claude SDK format.
-
-        Returns None if the data doesn't contain a recognized tool structure.
-        """
+        """Convert a data part's payload to Claude SDK format."""
         if "tool_use" in data:
             tu = data["tool_use"]
             return {
@@ -124,7 +161,6 @@ class MessageConverter:
         messages: list[dict[str, Any]] = []
 
         for msg in history:
-            # Handle both dict (legacy test) and Pydantic model
             if isinstance(msg, dict):
                 role = msg.get("role")
                 parts = msg.get("parts", [])
@@ -157,7 +193,7 @@ class MessageConverter:
         return Artifact(
             artifact_id=str(uuid.uuid4()),
             name=name,
-            parts=[Part(root=TextPart(kind="text", text=text))],
+            parts=[_text_part(text)],
         )
 
     @staticmethod
