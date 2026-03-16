@@ -4,7 +4,7 @@ import logging
 
 import pytest
 
-from fastharness.step_logger import ConsoleStepLogger, StepEvent
+from fastharness.step_logger import ConsoleStepLogger, StepEvent, StepLogger
 
 
 class TestStepEvent:
@@ -95,6 +95,5 @@ class TestConsoleStepLogger:
         result = ConsoleStepLogger._fmt({})
         assert result == ""
 
-    def test_has_log_step_method(self) -> None:
-        logger = ConsoleStepLogger()
-        assert callable(getattr(logger, "log_step", None))
+    def test_implements_protocol(self) -> None:
+        assert isinstance(ConsoleStepLogger(), StepLogger)

@@ -1,7 +1,7 @@
 """Intermediate step logging for agent execution."""
 
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, runtime_checkable
 
 from fastharness.logging import get_logger
 
@@ -19,6 +19,7 @@ class StepEvent:
     data: dict[str, Any]
 
 
+@runtime_checkable
 class StepLogger(Protocol):
     """Protocol for step loggers."""
 
