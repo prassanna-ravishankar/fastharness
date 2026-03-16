@@ -19,6 +19,7 @@ from fastharness.core.agent import Agent, AgentConfig
 from fastharness.core.context import AgentContext
 from fastharness.core.skill import Skill
 from fastharness.logging import get_logger
+from fastharness.runtime.base import AgentRuntimeFactory
 from fastharness.worker.claude_executor import AgentRegistry, ClaudeAgentExecutor
 
 logger = get_logger("app")
@@ -62,6 +63,7 @@ class FastHarness:
         version: str = "1.0.0",
         url: str = "http://localhost:8000",
         task_store: TaskStore | None = None,
+        runtime_factory: AgentRuntimeFactory | None = None,
     ):
         """Initialize FastHarness.
 
@@ -71,12 +73,14 @@ class FastHarness:
             version: Version for the A2A agent card.
             url: URL where the agent is hosted.
             task_store: TaskStore implementation (defaults to InMemoryTaskStore).
+            runtime_factory: AgentRuntimeFactory to use (defaults to ClaudeRuntimeFactory).
         """
         self.name = name
         self.description = description
         self.version = version
         self.url = url
         self._task_store = task_store or InMemoryTaskStore()
+        self._runtime_factory = runtime_factory
         self._agents: dict[str, Agent] = {}
         self._app: FastAPI | None = None
 
@@ -267,10 +271,11 @@ class FastHarness:
             default_output_modes=["text"],  # Default to text output
         )
 
-        # Create ClaudeAgentExecutor
+        # Create ClaudeAgentExecutor — inject factory if provided
         executor = ClaudeAgentExecutor(
             agent_registry=registry,
             task_store=self._task_store,
+            runtime_factory=self._runtime_factory,
         )
 
         # Store executor reference for lifecycle management
@@ -312,16 +317,16 @@ class FastHarness:
         # Ensure app is created
         _ = self.app
 
-        # Start client pool cleanup task
+        # Start runtime factory cleanup task
         if hasattr(self, "_executor"):
-            await self._executor._client_pool.start_cleanup_task()
+            await self._executor._runtime_factory.start_cleanup_task()
 
         try:
             yield
         finally:
-            # Shutdown client pool on app shutdown
+            # Shutdown runtime factory on app shutdown
             if hasattr(self, "_executor"):
-                await self._executor._client_pool.shutdown()
+                await self._executor._runtime_factory.shutdown()
 
     @property
     def app(self) -> "FastAPI":

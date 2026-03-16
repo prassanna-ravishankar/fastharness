@@ -7,6 +7,8 @@ from fastharness.core.context import AgentContext, Message
 from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.core.response import AgentResponse, Artifact
 from fastharness.core.skill import Skill
+from fastharness.runtime.base import AgentRuntime, AgentRuntimeFactory
+from fastharness.runtime.claude import ClaudeRuntimeFactory
 from fastharness.step_logger import ConsoleStepLogger, StepEvent, StepLogger
 from fastharness.telemetry import CostTracker, ExecutionMetrics, TelemetryCallback
 
@@ -33,6 +35,10 @@ __all__ = [
     "Artifact",
     # Skill
     "Skill",
+    # Runtime
+    "AgentRuntime",
+    "AgentRuntimeFactory",
+    "ClaudeRuntimeFactory",
     # Telemetry
     "ExecutionMetrics",
     "TelemetryCallback",

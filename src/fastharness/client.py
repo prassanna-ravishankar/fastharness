@@ -3,7 +3,7 @@
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from claude_agent_sdk import (
     AssistantMessage,
@@ -17,6 +17,9 @@ from fastharness.core.event import DoneEvent, Event, TextEvent, ToolEvent
 from fastharness.logging import get_logger
 from fastharness.step_logger import StepEvent, StepLogger, StepType
 from fastharness.telemetry import ExecutionMetrics, TelemetryCallback
+
+if TYPE_CHECKING:
+    from fastharness.runtime.base import AgentRuntime
 
 logger = get_logger("client")
 
@@ -43,7 +46,7 @@ class HarnessClient:
     output_format: dict[str, Any] | None = None
     telemetry_callbacks: list[TelemetryCallback] = field(default_factory=list)
     step_logger: StepLogger | None = None
-    pooled_client: ClaudeSDKClient | None = None
+    runtime: "AgentRuntime | None" = None
 
     def _build_options(self, **overrides: Any) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions, merging client config with overrides.
@@ -171,25 +174,15 @@ class HarnessClient:
         turn_number = 0
 
         try:
-            if self.pooled_client:
-                # Use pooled client directly (no context manager)
-                client = self.pooled_client
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage):
-                        for block in message.content:
-                            if isinstance(block, TextBlock):
-                                final_text = block.text
-                        await self._log_assistant_blocks(message.content, turn_number)
-                    elif isinstance(message, ResultMessage):
-                        await self._log_turn_complete(message, turn_number)
-                        if message.result:
-                            final_text = message.result
-                        structured_output = getattr(message, "structured_output", None)
-                        turn_number += 1
-                        break
+            if self.runtime is not None:
+                result = await self.runtime.run(prompt)
+                # runtime.run() returns str | structured_output directly
+                if isinstance(result, str):
+                    final_text = result
+                else:
+                    structured_output = result
             else:
-                # Create temporary client (existing behavior)
+                # Create temporary client (existing behaviour)
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
                     async for message in client.receive_response():
@@ -235,34 +228,11 @@ class HarnessClient:
         turn_number = 0
 
         try:
-            if self.pooled_client:
-                # Use pooled client directly (no context manager)
-                client = self.pooled_client
-                await client.query(prompt)
-                async for message in client.receive_response():
-                    if isinstance(message, AssistantMessage):
-                        await self._log_assistant_blocks(message.content, turn_number)
-                        for block in message.content:
-                            if isinstance(block, TextBlock):
-                                final_text = block.text
-                                yield TextEvent(text=block.text)
-                            elif hasattr(block, "name") and hasattr(block, "input"):
-                                yield ToolEvent(
-                                    tool_name=getattr(block, "name", ""),
-                                    tool_input=getattr(block, "input", {}),
-                                )
-                    elif isinstance(message, ResultMessage):
-                        await self._log_turn_complete(message, turn_number)
-                        if message.result:
-                            final_text = message.result
-                        yield DoneEvent(
-                            final_text=final_text,
-                            structured_output=getattr(message, "structured_output", None),
-                        )
-                        turn_number += 1
-                        break
+            if self.runtime is not None:
+                async for event in self.runtime.stream(prompt):
+                    yield event
             else:
-                # Create temporary client (existing behavior)
+                # Create temporary client (existing behaviour)
                 async with ClaudeSDKClient(options) as client:
                     await client.query(prompt)
                     async for message in client.receive_response():

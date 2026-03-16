@@ -14,7 +14,7 @@ from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
 from fastharness.core.context import Message as ContextMessage
 from fastharness.logging import get_logger
-from fastharness.worker.client_pool import ClientPool
+from fastharness.runtime.base import AgentRuntimeFactory
 from fastharness.worker.converter import MessageConverter
 
 if TYPE_CHECKING:
@@ -121,11 +121,17 @@ class ClaudeAgentExecutor(AgentExecutor):
 
     agent_registry: AgentRegistry
     task_store: TaskStore
+    runtime_factory: AgentRuntimeFactory | None = None
 
     def __post_init__(self) -> None:
-        """Initialize task tracking and client pool."""
+        """Initialize task tracking and runtime factory."""
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
-        self._client_pool = ClientPool(ttl_minutes=15)
+        if self.runtime_factory is not None:
+            self._runtime_factory: AgentRuntimeFactory = self.runtime_factory
+        else:
+            from fastharness.runtime.claude import ClaudeRuntimeFactory
+
+            self._runtime_factory = ClaudeRuntimeFactory(ttl_minutes=15)
 
     def build_message_history(self, history: list[Message]) -> list[Any]:
         """Convert A2A message history to Claude SDK format."""
@@ -287,39 +293,12 @@ class ClaudeAgentExecutor(AgentExecutor):
                 message_history=message_history,
             )
 
-            # Build ClaudeAgentOptions from agent config
-            from typing import Literal, cast
-
-            from claude_agent_sdk import ClaudeAgentOptions
-
+            # Get or create a runtime scoped to user+context
             config = agent.config
-            options = ClaudeAgentOptions(
-                system_prompt=config.system_prompt,
-                allowed_tools=config.tools,
-                model=config.model,
-                max_turns=config.max_turns,
-                mcp_servers=config.mcp_servers,
-                setting_sources=cast(
-                    list[Literal["user", "project", "local"]] | None, config.setting_sources
-                ),
-                output_format=config.output_format,
-                permission_mode="bypassPermissions",
-            )
-
-            # Pool key scoped to user+context to isolate sessions between users
             pool_key = f"{_get_user_id(context)}:{context_id}"
-            pooled_client, is_new = await self._client_pool.get_or_create(pool_key, options)
-            logger.info(
-                "Retrieved pooled client",
-                extra={
-                    "pool_key": pool_key,
-                    "context_id": context_id,
-                    "is_new": is_new,
-                    "pool_size": len(self._client_pool._pool),
-                },
-            )
+            runtime = await self._runtime_factory.get_or_create(pool_key, config)
 
-            # Build HarnessClient with pooled SDK client
+            # Build HarnessClient with runtime
             client = HarnessClient(
                 system_prompt=config.system_prompt,
                 tools=config.tools,
@@ -328,7 +307,7 @@ class ClaudeAgentExecutor(AgentExecutor):
                 mcp_servers=config.mcp_servers,
                 setting_sources=config.setting_sources,
                 output_format=config.output_format,
-                pooled_client=pooled_client,
+                runtime=runtime,
             )
 
             # Execute agent
@@ -378,8 +357,8 @@ class ClaudeAgentExecutor(AgentExecutor):
                 },
             )
 
-            # Cleanup pooled client on task failure
-            await self._client_pool.remove(f"{_get_user_id(context)}:{context_id}")
+            # Cleanup runtime on task failure
+            await self._runtime_factory.remove(f"{_get_user_id(context)}:{context_id}")
 
             try:
                 if context.current_task:
@@ -438,9 +417,9 @@ class ClaudeAgentExecutor(AgentExecutor):
         if not current_task:
             return
 
-        # Cleanup pooled client on task cancellation
+        # Cleanup runtime on task cancellation
         if context.context_id:
-            await self._client_pool.remove(f"{_get_user_id(context)}:{context.context_id}")
+            await self._runtime_factory.remove(f"{_get_user_id(context)}:{context.context_id}")
 
         current_task.status = TaskStatus(state=TaskState.canceled)
         await self.task_store.save(current_task)
