@@ -8,7 +8,17 @@ from a2a.server.agent_execution.agent_executor import AgentExecutor
 from a2a.server.agent_execution.context import RequestContext
 from a2a.server.events.event_queue import EventQueue
 from a2a.server.tasks.task_store import TaskStore
-from a2a.types import Artifact, Message, Role, Task, TaskState, TaskStatus
+from a2a.types import (
+    Artifact,
+    Message,
+    Part,
+    Role,
+    Task,
+    TaskArtifactUpdateEvent,
+    TaskState,
+    TaskStatus,
+    TextPart,
+)
 
 from fastharness.client import HarnessClient
 from fastharness.core.context import AgentContext
@@ -311,40 +321,32 @@ class ClaudeAgentExecutor(AgentExecutor):
             )
 
             # Execute agent
-            execution_mode = "custom" if agent.func is not None else "default"
-            logger.debug(
-                f"Executing {execution_mode} agent run",
-                extra={"task_id": task_id, "agent_name": agent.config.name},
-            )
-
             if agent.func is not None:
+                # Custom loop — run() only, loop controls execution
+                logger.debug(
+                    "Executing custom agent run",
+                    extra={"task_id": task_id, "agent_name": agent.config.name},
+                )
                 result = await agent.func(prompt, ctx, client)
+                await self._complete_task(
+                    current_task, result, task_id, context_id, event_queue
+                )
             else:
-                result = await client.run(prompt)
-
-            # Convert result to artifacts and response message
-            artifacts = self.build_artifacts(result)
-            response_message = MessageConverter.claude_to_a2a_message(
-                role="assistant",
-                content=result if isinstance(result, str) else str(result),
-            )
-
-            # Update task with results (only the assistant's response; user message
-            # is already in history)
-            task_history = _ensure_history(current_task)
-            task_history.append(response_message)
-
-            current_task.status = TaskStatus(state=TaskState.completed)
-            current_task.artifacts = artifacts
-            await self.task_store.save(current_task)
-            await event_queue.enqueue_event(response_message)
-
-            # Don't cleanup pooled client on task completion - let TTL handle it
-            # This allows multi-turn conversations within the same context
+                # Default agent — stream tokens as A2A artifact updates
+                logger.debug(
+                    "Executing streaming agent run",
+                    extra={"task_id": task_id, "agent_name": agent.config.name},
+                )
+                await self._stream_task(
+                    current_task, client, prompt, task_id, context_id, event_queue
+                )
 
             logger.info(
                 "Task completed successfully",
-                extra={"task_id": task_id, "artifact_count": len(artifacts)},
+                extra={
+                    "task_id": task_id,
+                    "artifact_count": len(current_task.artifacts or []),
+                },
             )
 
         except Exception as e:
@@ -379,6 +381,103 @@ class ClaudeAgentExecutor(AgentExecutor):
                     "Failed to update task to failed state",
                     extra={"task_id": task_id},
                 )
+
+    async def _complete_task(
+        self,
+        task: Task,
+        result: Any,
+        task_id: str,
+        context_id: str,
+        event_queue: EventQueue,
+    ) -> None:
+        """Finalize a task with a complete result (used by custom loops)."""
+        artifacts = self.build_artifacts(result)
+        response_message = MessageConverter.claude_to_a2a_message(
+            role="assistant",
+            content=result if isinstance(result, str) else str(result),
+        )
+
+        task_history = _ensure_history(task)
+        task_history.append(response_message)
+
+        task.status = TaskStatus(state=TaskState.completed)
+        task.artifacts = artifacts
+        await self.task_store.save(task)
+        await event_queue.enqueue_event(response_message)
+
+    async def _stream_task(
+        self,
+        task: Task,
+        client: HarnessClient,
+        prompt: str,
+        task_id: str,
+        context_id: str,
+        event_queue: EventQueue,
+    ) -> None:
+        """Stream agent execution, emitting A2A artifact updates as tokens arrive."""
+        import uuid
+
+        from fastharness.core.event import DoneEvent, TextEvent
+
+        artifact_id = str(uuid.uuid4())
+        full_text = ""
+        chunk_count = 0
+
+        async for event in client.stream(prompt):
+            if isinstance(event, TextEvent):
+                chunk_count += 1
+                full_text += event.text
+                # Emit incremental artifact update
+                chunk_artifact = Artifact(
+                    artifact_id=artifact_id,
+                    name="response",
+                    parts=[Part(root=TextPart(kind="text", text=event.text))],
+                )
+                await event_queue.enqueue_event(
+                    TaskArtifactUpdateEvent(
+                        task_id=task_id,
+                        context_id=context_id,
+                        artifact=chunk_artifact,
+                        append=chunk_count > 1,
+                    )
+                )
+            elif isinstance(event, DoneEvent):
+                final_text = event.final_text or full_text
+                # Emit last-chunk artifact marker
+                final_artifact = Artifact(
+                    artifact_id=artifact_id,
+                    name="response",
+                    parts=[Part(root=TextPart(kind="text", text=""))],
+                )
+                await event_queue.enqueue_event(
+                    TaskArtifactUpdateEvent(
+                        task_id=task_id,
+                        context_id=context_id,
+                        artifact=final_artifact,
+                        append=True,
+                        last_chunk=True,
+                    )
+                )
+
+                # Finalize task state
+                response_message = MessageConverter.claude_to_a2a_message(
+                    role="assistant", content=final_text
+                )
+                task_history = _ensure_history(task)
+                task_history.append(response_message)
+
+                complete_artifact = MessageConverter.text_to_artifact(final_text)
+                task.status = TaskStatus(state=TaskState.completed)
+                task.artifacts = [complete_artifact]
+                await self.task_store.save(task)
+
+                # Emit the Message — required for message/send compatibility
+                await event_queue.enqueue_event(response_message)
+                break
+
+        # If stream ended without DoneEvent (shouldn't happen, but handle it)
+        if task.status.state != TaskState.completed:
+            await self._complete_task(task, full_text, task_id, context_id, event_queue)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
         """Cancel a running task."""
