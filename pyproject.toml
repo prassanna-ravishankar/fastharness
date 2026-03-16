@@ -1,7 +1,7 @@
 [project]
 name = "fastharness"
 version = "1.1.0"
-description = "Wrap Claude Agent SDK and expose agents as A2A-compliant FastAPI services"
+description = "Expose AI agents as A2A-compliant FastAPI services with pluggable runtime backends"
 readme = "README.md"
 authors = [
     { name = "Prass, The Nomadic Coder", email = "atemysemicolon@gmail.com" }

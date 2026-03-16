@@ -82,18 +82,41 @@ class HarnessClient:
 
         usage = getattr(result_msg, "usage", None)
         usage_dict = usage if isinstance(usage, dict) else {}
+        await self._emit_telemetry_from_metrics(
+            {
+                "total_cost_usd": getattr(result_msg, "total_cost_usd", None),
+                "input_tokens": usage_dict.get("input_tokens"),
+                "output_tokens": usage_dict.get("output_tokens"),
+                "cache_read_input_tokens": usage_dict.get("cache_read_input_tokens"),
+                "cache_creation_input_tokens": usage_dict.get("cache_creation_input_tokens"),
+                "duration_ms": getattr(result_msg, "duration_ms", 0),
+                "duration_api_ms": getattr(result_msg, "duration_api_ms", 0),
+                "num_turns": getattr(result_msg, "num_turns", 1),
+                "session_id": getattr(result_msg, "session_id", "unknown"),
+                "is_error": getattr(result_msg, "is_error", False),
+            },
+            task_id=task_id,
+        )
+
+    async def _emit_telemetry_from_metrics(
+        self, raw: dict[str, Any], task_id: str = "unknown"
+    ) -> None:
+        """Build ExecutionMetrics from a dict and notify callbacks."""
+        if not self.telemetry_callbacks:
+            return
+
         metrics = ExecutionMetrics(
             task_id=task_id,
-            session_id=getattr(result_msg, "session_id", "unknown"),
-            total_cost_usd=getattr(result_msg, "total_cost_usd", None),
-            input_tokens=usage_dict.get("input_tokens"),
-            output_tokens=usage_dict.get("output_tokens"),
-            cache_read_tokens=usage_dict.get("cache_read_input_tokens"),
-            cache_write_tokens=usage_dict.get("cache_creation_input_tokens"),
-            duration_ms=getattr(result_msg, "duration_ms", 0),
-            duration_api_ms=getattr(result_msg, "duration_api_ms", 0),
-            num_turns=getattr(result_msg, "num_turns", 1),
-            status="error" if getattr(result_msg, "is_error", False) else "success",
+            session_id=raw.get("session_id", "unknown"),
+            total_cost_usd=raw.get("total_cost_usd"),
+            input_tokens=raw.get("input_tokens"),
+            output_tokens=raw.get("output_tokens"),
+            cache_read_tokens=raw.get("cache_read_input_tokens"),
+            cache_write_tokens=raw.get("cache_creation_input_tokens"),
+            duration_ms=raw.get("duration_ms", 0),
+            duration_api_ms=raw.get("duration_api_ms", 0),
+            num_turns=raw.get("num_turns", 1),
+            status="error" if raw.get("is_error") else "success",
             timestamp=datetime.now(UTC),
         )
 
@@ -233,7 +256,20 @@ class HarnessClient:
                     if isinstance(event, TextEvent):
                         await self._log_step("assistant_message", 0, {"text": event.text})
                     elif isinstance(event, DoneEvent):
-                        await self._log_step("turn_complete", 0, {})
+                        await self._log_step(
+                            "turn_complete",
+                            0,
+                            {
+                                "cost_usd": event.metrics.get("total_cost_usd"),
+                                "usage": {
+                                    k: v
+                                    for k, v in event.metrics.items()
+                                    if k.endswith("_tokens")
+                                }
+                                or None,
+                            },
+                        )
+                        await self._emit_telemetry_from_metrics(event.metrics)
                     yield event
             else:
                 options = self._build_options(**opts)

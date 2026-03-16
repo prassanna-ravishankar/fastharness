@@ -28,6 +28,7 @@ class DoneEvent:
 
     final_text: str | None = None
     structured_output: Any = None
+    metrics: dict[str, Any] = field(default_factory=dict)
     type: Literal["done"] = "done"
 
 

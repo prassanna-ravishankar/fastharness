@@ -81,9 +81,19 @@ class ClaudeRuntime:
             elif isinstance(message, ResultMessage):
                 if message.result:
                     final_text = message.result
+                usage = getattr(message, "usage", None)
+                usage_dict = usage if isinstance(usage, dict) else {}
                 yield DoneEvent(
                     final_text=final_text,
                     structured_output=getattr(message, "structured_output", None),
+                    metrics={
+                        "total_cost_usd": getattr(message, "total_cost_usd", None),
+                        "input_tokens": usage_dict.get("input_tokens"),
+                        "output_tokens": usage_dict.get("output_tokens"),
+                        "duration_ms": getattr(message, "duration_ms", 0),
+                        "num_turns": getattr(message, "num_turns", 1),
+                        "session_id": getattr(message, "session_id", "unknown"),
+                    },
                 )
                 break
 
