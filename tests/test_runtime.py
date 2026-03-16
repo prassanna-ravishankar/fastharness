@@ -397,8 +397,12 @@ class TestHarnessClientRuntimeIntegration:
 
     @pytest.mark.asyncio
     async def test_run_delegates_to_runtime(self) -> None:
-        mock_runtime = AsyncMock(spec=AgentRuntime)
-        mock_runtime.run = AsyncMock(return_value="runtime result")
+        async def fake_stream(prompt: str) -> AsyncIterator[Event]:
+            yield TextEvent(text="runtime result")
+            yield DoneEvent(final_text="runtime result")
+
+        mock_runtime = MagicMock(spec=AgentRuntime)
+        mock_runtime.stream = fake_stream
 
         from fastharness import HarnessClient
 
@@ -406,12 +410,14 @@ class TestHarnessClientRuntimeIntegration:
         result = await client.run("test prompt")
 
         assert result == "runtime result"
-        mock_runtime.run.assert_called_once_with("test prompt")
 
     @pytest.mark.asyncio
     async def test_run_structured_output_via_runtime(self) -> None:
-        mock_runtime = AsyncMock(spec=AgentRuntime)
-        mock_runtime.run = AsyncMock(return_value={"structured": True})
+        async def fake_stream(prompt: str) -> AsyncIterator[Event]:
+            yield DoneEvent(final_text=None, structured_output={"structured": True})
+
+        mock_runtime = MagicMock(spec=AgentRuntime)
+        mock_runtime.stream = fake_stream
 
         from fastharness import HarnessClient
 
@@ -442,13 +448,17 @@ class TestHarnessClientRuntimeIntegration:
 
     @pytest.mark.asyncio
     async def test_run_wraps_runtime_error(self) -> None:
-        mock_runtime = AsyncMock(spec=AgentRuntime)
-        mock_runtime.run = AsyncMock(side_effect=ValueError("boom"))
+        async def failing_stream(prompt: str) -> AsyncIterator[Event]:
+            raise ValueError("boom")
+            yield  # type: ignore[misc]
+
+        mock_runtime = MagicMock(spec=AgentRuntime)
+        mock_runtime.stream = failing_stream
 
         from fastharness import HarnessClient
 
         client = HarnessClient(runtime=mock_runtime)
-        with pytest.raises(RuntimeError, match="Agent execution failed.*boom"):
+        with pytest.raises(RuntimeError, match="Agent.*failed.*boom"):
             await client.run("test")
 
     @pytest.mark.asyncio
@@ -469,10 +479,14 @@ class TestHarnessClientRuntimeIntegration:
 
     @pytest.mark.asyncio
     async def test_run_step_logging_with_runtime(self) -> None:
-        """Verify step logger fires when using a runtime."""
-        mock_runtime = AsyncMock(spec=AgentRuntime)
-        mock_runtime.run = AsyncMock(return_value="logged result")
+        """Verify step logger fires when using a runtime (via stream delegation)."""
 
+        async def fake_stream(prompt: str) -> AsyncIterator[Event]:
+            yield TextEvent(text="logged result")
+            yield DoneEvent(final_text="logged result")
+
+        mock_runtime = MagicMock(spec=AgentRuntime)
+        mock_runtime.stream = fake_stream
 
         from fastharness import HarnessClient
 
@@ -481,9 +495,7 @@ class TestHarnessClientRuntimeIntegration:
         client = HarnessClient(runtime=mock_runtime, step_logger=mock_logger)
         await client.run("test")
 
-        # Should have logged assistant_message + turn_complete
-        assert mock_logger.log_step.call_count == 2
-        first_call = mock_logger.log_step.call_args_list[0]
-        assert first_call[0][0].step_type == "assistant_message"
-        second_call = mock_logger.log_step.call_args_list[1]
-        assert second_call[0][0].step_type == "turn_complete"
+        # Should have logged assistant_message + turn_complete (from stream path)
+        step_types = [c[0][0].step_type for c in mock_logger.log_step.call_args_list]
+        assert "assistant_message" in step_types
+        assert "turn_complete" in step_types

@@ -197,13 +197,16 @@ class HarnessClient:
 
         try:
             if self.runtime is not None:
-                result = await self.runtime.run(prompt)
-                if isinstance(result, str):
-                    final_text = result
-                    await self._log_step("assistant_message", 0, {"text": result})
-                else:
-                    structured_output = result
-                await self._log_step("turn_complete", 0, {})
+                # Delegate through stream() to capture DoneEvent metrics
+                async for event in self.stream(prompt):
+                    if isinstance(event, DoneEvent):
+                        if event.structured_output is not None:
+                            structured_output = event.structured_output
+                        elif event.final_text:
+                            final_text = event.final_text
+                        break
+                    elif isinstance(event, TextEvent):
+                        final_text = event.text
             else:
                 options = self._build_options(**opts)
                 # Create temporary client (existing behaviour)
