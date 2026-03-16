@@ -12,7 +12,7 @@ from fastharness.logging import get_logger
 
 try:
     from pydantic_ai._agent_graph import CallToolsNode
-    from pydantic_ai_backend import StateBackend
+    from pydantic_ai_backends import StateBackend
     from pydantic_deep import DeepAgentDeps, create_deep_agent
 except ImportError as e:
     raise ImportError(
@@ -38,8 +38,18 @@ class _SessionEntry:
 
 
 def _create_agent(config: AgentConfig) -> Any:
-    """Create a pydantic-deep agent from AgentConfig."""
-    kwargs: dict[str, Any] = {}
+    """Create a pydantic-deep agent from AgentConfig.
+
+    Disables toolsets that eagerly validate API credentials at creation time
+    (subagents, skills, web) — fastharness handles tool orchestration externally.
+    """
+    kwargs: dict[str, Any] = {
+        "include_subagents": False,
+        "include_skills": False,
+        "include_web": False,
+        "include_filesystem": False,
+        "include_todo": False,
+    }
     if config.model:
         kwargs["model"] = config.model
     if config.system_prompt:

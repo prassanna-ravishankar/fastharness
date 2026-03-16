@@ -23,15 +23,15 @@ def _make_config(**overrides) -> AgentConfig:
 
 @pytest.fixture
 def mock_deepagents_sdk(monkeypatch):
-    """Inject fake pydantic_deep / pydantic_ai_backend modules."""
+    """Inject fake pydantic_deep / pydantic_ai_backends modules."""
     # pydantic_ai and submodules
     pydantic_ai_mod = ModuleType("pydantic_ai")
     pydantic_ai_graph_mod = ModuleType("pydantic_ai._agent_graph")
     mock_call_tools_node = type("CallToolsNode", (), {})
     pydantic_ai_graph_mod.CallToolsNode = mock_call_tools_node
 
-    # pydantic_ai_backend
-    backends_mod = ModuleType("pydantic_ai_backend")
+    # pydantic_ai_backends
+    backends_mod = ModuleType("pydantic_ai_backends")
     mock_state_backend = MagicMock(name="StateBackend")
     backends_mod.StateBackend = mock_state_backend
 
@@ -44,7 +44,7 @@ def mock_deepagents_sdk(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "pydantic_ai", pydantic_ai_mod)
     monkeypatch.setitem(sys.modules, "pydantic_ai._agent_graph", pydantic_ai_graph_mod)
-    monkeypatch.setitem(sys.modules, "pydantic_ai_backend", backends_mod)
+    monkeypatch.setitem(sys.modules, "pydantic_ai_backends", backends_mod)
     monkeypatch.setitem(sys.modules, "pydantic_deep", deep_mod)
 
     # Clear cached import
@@ -136,7 +136,13 @@ class TestDeepAgentsRuntimeFactory:
 
         assert isinstance(runtime, DeepAgentsRuntime)
         mock_deepagents_sdk["create_deep_agent"].assert_called_once_with(
-            model="openai:gpt-4.1", instructions="Be helpful"
+            include_subagents=False,
+            include_skills=False,
+            include_web=False,
+            include_filesystem=False,
+            include_todo=False,
+            model="openai:gpt-4.1",
+            instructions="Be helpful",
         )
 
     @pytest.mark.asyncio

@@ -65,9 +65,14 @@ class TestOpenHandsRuntime:
         mock_conv.send_message = MagicMock()
         mock_conv.run = MagicMock()
 
-        # Simulate conversation state with events
+        # Simulate conversation state with OpenHands event structure
+        text_block = MagicMock()
+        text_block.text = "Hello from OpenHands"
+        llm_msg = MagicMock()
+        llm_msg.content = [text_block]
         event = MagicMock()
-        event.content = "Hello from OpenHands"
+        event.source = "agent"
+        event.llm_message = llm_msg
         mock_state = MagicMock()
         mock_state.events = [event]
         mock_conv.state = mock_state
@@ -101,8 +106,13 @@ class TestOpenHandsRuntime:
         mock_conv.send_message = MagicMock()
         mock_conv.run = MagicMock()
 
+        text_block = MagicMock()
+        text_block.text = "Streaming response"
+        llm_msg = MagicMock()
+        llm_msg.content = [text_block]
         event = MagicMock()
-        event.content = "Streaming response"
+        event.source = "agent"
+        event.llm_message = llm_msg
         mock_conv.state = MagicMock()
         mock_conv.state.events = [event]
 

@@ -26,7 +26,7 @@ def _config_to_agent(config: AgentConfig) -> Agent:
     """Convert AgentConfig to an OpenHands Agent."""
     llm = LLM(model=config.model)
 
-    tools = [Tool(name=t) for t in config.tools] if config.tools else None
+    tools = [Tool(name=t) for t in config.tools] if config.tools else []
 
     return Agent(llm=llm, tools=tools)
 
@@ -50,45 +50,57 @@ class OpenHandsRuntime:
     def __init__(self, conversation: Conversation) -> None:
         self._conversation = conversation
 
+    @staticmethod
+    def _extract_agent_text(events: list[Any]) -> str:
+        """Extract the last agent message text from conversation events."""
+        for event in reversed(events):
+            if getattr(event, "source", None) != "agent":
+                continue
+            llm_msg = getattr(event, "llm_message", None)
+            if llm_msg is None:
+                continue
+            for block in getattr(llm_msg, "content", []):
+                text = getattr(block, "text", None)
+                if text:
+                    return text
+        return ""
+
     async def run(self, prompt: str) -> Any:
         """Send a message and run the conversation to completion."""
         self._conversation.send_message(prompt)
 
-        # Conversation.run() is synchronous — offload to a thread
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._conversation.run)
 
-        # Extract final response from conversation events
-        events = getattr(self._conversation, "state", None)
-        if events and hasattr(events, "events"):
-            for event in reversed(events.events):
-                content = getattr(event, "content", None)
-                if content and isinstance(content, str):
-                    return content
-
-        return ""
+        state = getattr(self._conversation, "state", None)
+        events = getattr(state, "events", [])
+        return self._extract_agent_text(events)
 
     async def stream(self, prompt: str) -> AsyncIterator[Event]:
         """Stream events from the conversation.
 
-        OpenHands SDK doesn't natively support async streaming in the same way,
-        so we run the conversation and yield events after completion.
+        OpenHands SDK runs synchronously, so we yield events after completion.
         """
         self._conversation.send_message(prompt)
 
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._conversation.run)
 
-        # Yield events from conversation state
-        events = getattr(self._conversation, "state", None)
+        state = getattr(self._conversation, "state", None)
+        raw_events = getattr(state, "events", [])
         final_text: str | None = None
 
-        if events and hasattr(events, "events"):
-            for event in events.events:
-                content = getattr(event, "content", None)
-                if content and isinstance(content, str):
-                    final_text = content
-                    yield TextEvent(text=content)
+        for event in raw_events:
+            if getattr(event, "source", None) != "agent":
+                continue
+            llm_msg = getattr(event, "llm_message", None)
+            if llm_msg is None:
+                continue
+            for block in getattr(llm_msg, "content", []):
+                text = getattr(block, "text", None)
+                if text:
+                    final_text = text
+                    yield TextEvent(text=text)
 
         yield DoneEvent(final_text=final_text)
 
