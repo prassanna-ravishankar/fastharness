@@ -17,6 +17,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+openhands = [
+    "openhands-sdk>=0.1.0; python_version >= '3.12'",
+]
+deepagents = [
+    "pydantic-deep>=0.1.0",
+    "pydantic-ai-backend>=0.1.0",
+]
 dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.24.0",
