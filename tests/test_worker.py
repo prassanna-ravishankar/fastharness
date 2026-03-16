@@ -105,6 +105,45 @@ class TestClaudeExecutorBuildArtifacts:
         assert "42" in part.text
 
 
+class TestClaudeExecutorRuntimeFactory:
+    """Tests for runtime factory injection and defaults."""
+
+    def test_default_runtime_factory(self) -> None:
+        """Executor creates ClaudeRuntimeFactory by default when none provided."""
+        from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
+
+        from fastharness.runtime.claude import ClaudeRuntimeFactory
+
+        skill = Skill(id="s1", name="S1", description="Skill 1")
+        config = AgentConfig(name="test", description="Test", skills=[skill])
+        agent = Agent(config=config, func=None)
+        registry = AgentRegistry(agents={"test": agent})
+        executor = ClaudeAgentExecutor(
+            agent_registry=registry,
+            task_store=InMemoryTaskStore(),
+        )
+        assert isinstance(executor._runtime_factory, ClaudeRuntimeFactory)
+
+    def test_custom_runtime_factory(self) -> None:
+        """Executor uses injected runtime factory when provided."""
+        from unittest.mock import MagicMock
+
+        from a2a.server.tasks.inmemory_task_store import InMemoryTaskStore
+
+        skill = Skill(id="s1", name="S1", description="Skill 1")
+        config = AgentConfig(name="test", description="Test", skills=[skill])
+        agent = Agent(config=config, func=None)
+        registry = AgentRegistry(agents={"test": agent})
+
+        mock_factory = MagicMock()
+        executor = ClaudeAgentExecutor(
+            agent_registry=registry,
+            task_store=InMemoryTaskStore(),
+            runtime_factory=mock_factory,
+        )
+        assert executor._runtime_factory is mock_factory
+
+
 class TestClaudeExecutorTaskTracking:
     """Tests for ClaudeAgentExecutor task tracking."""
 
