@@ -6,12 +6,19 @@ require their respective optional dependencies:
     pip install fastharness[deepagents]
 """
 
-from fastharness.runtime.base import AgentRuntime, AgentRuntimeFactory
+from fastharness.runtime.base import (
+    AgentRuntime,
+    AgentRuntimeFactory,
+    BaseSessionFactory,
+    SessionEntry,
+)
 from fastharness.runtime.claude import ClaudeRuntime, ClaudeRuntimeFactory
 
 __all__ = [
     "AgentRuntime",
     "AgentRuntimeFactory",
+    "BaseSessionFactory",
+    "SessionEntry",
     "ClaudeRuntime",
     "ClaudeRuntimeFactory",
 ]

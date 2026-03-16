@@ -291,6 +291,94 @@ class TestClaudeRuntimeFactory:
         assert mock_client.__aexit__.call_count == 2
 
 
+class TestBaseSessionFactory:
+    """Tests for the shared BaseSessionFactory."""
+
+    def _make_factory(self) -> Any:
+        import logging
+
+        from fastharness.runtime.base import BaseSessionFactory, SessionEntry
+
+        class StubSession(SessionEntry):
+            value: str = "stub"
+
+        class StubFactory(BaseSessionFactory):
+            create_count: int = 0
+
+            async def _create_session(self, config: AgentConfig) -> StubSession:
+                self.create_count += 1
+                return StubSession()
+
+            def _build_runtime(self, entry: SessionEntry) -> Any:
+                return MagicMock()
+
+        return StubFactory(ttl_minutes=15, logger=logging.getLogger("test"))
+
+    @pytest.mark.asyncio
+    async def test_creates_session(self) -> None:
+        factory = self._make_factory()
+        config = AgentConfig(
+            name="t", description="t", skills=[Skill(id="s", name="S", description="d")]
+        )
+        runtime = await factory.get_or_create("k1", config)
+        assert runtime is not None
+        assert len(factory._sessions) == 1
+
+    @pytest.mark.asyncio
+    async def test_reuses_session(self) -> None:
+        factory = self._make_factory()
+        config = AgentConfig(
+            name="t", description="t", skills=[Skill(id="s", name="S", description="d")]
+        )
+        await factory.get_or_create("k1", config)
+        await factory.get_or_create("k1", config)
+        assert factory.create_count == 1  # type: ignore[attr-defined]
+
+    @pytest.mark.asyncio
+    async def test_remove(self) -> None:
+        factory = self._make_factory()
+        config = AgentConfig(
+            name="t", description="t", skills=[Skill(id="s", name="S", description="d")]
+        )
+        await factory.get_or_create("k1", config)
+        await factory.remove("k1")
+        assert len(factory._sessions) == 0
+
+    @pytest.mark.asyncio
+    async def test_remove_nonexistent_is_noop(self) -> None:
+        factory = self._make_factory()
+        await factory.remove("doesnt-exist")  # should not raise
+
+    @pytest.mark.asyncio
+    async def test_shutdown_clears_all(self) -> None:
+        factory = self._make_factory()
+        config = AgentConfig(
+            name="t", description="t", skills=[Skill(id="s", name="S", description="d")]
+        )
+        await factory.get_or_create("k1", config)
+        await factory.get_or_create("k2", config)
+        await factory.shutdown()
+        assert len(factory._sessions) == 0
+
+    def test_session_entry_stale(self) -> None:
+        from fastharness.runtime.base import SessionEntry
+
+        entry = SessionEntry()
+        assert not entry.is_stale(15)  # just created
+        assert entry.is_stale(0)  # 0 TTL → always stale
+
+    def test_session_entry_touch(self) -> None:
+        from datetime import timedelta
+
+        from fastharness.runtime.base import SessionEntry
+
+        entry = SessionEntry()
+        old_time = entry.last_accessed
+        entry.last_accessed -= timedelta(minutes=5)
+        entry.touch()
+        assert entry.last_accessed >= old_time
+
+
 class TestProtocolConformance:
     """Verify ClaudeRuntime and ClaudeRuntimeFactory satisfy their protocols."""
 
