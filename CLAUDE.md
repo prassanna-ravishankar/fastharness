@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-FastHarness wraps the Claude Agent SDK and exposes agents as A2A (Agent-to-Agent) protocol compliant services. It bridges Claude Agent SDK with Google's A2A protocol using the native A2A Python SDK.
+FastHarness exposes AI agents as A2A (Agent-to-Agent) protocol compliant services with pluggable runtime backends (Claude Agent SDK, OpenHands, Pydantic DeepAgents). It bridges agent SDKs with Google's A2A protocol using the native A2A Python SDK.
 
 ## Commands
 
@@ -36,16 +36,22 @@ FastHarness (app.py)
     ├── A2AFastAPIApplication (native A2A SDK)
     │   └── Exposes A2A endpoints: /.well-known/agent-card.json, JSON-RPC /
     │
-    └── ClaudeAgentExecutor (worker/claude_executor.py)
-        └── Executes tasks using HarnessClient → Claude Agent SDK
+    ├── ClaudeAgentExecutor (worker/claude_executor.py)
+    │   └── Executes tasks using HarnessClient → AgentRuntime
+    │
+    └── AgentRuntimeFactory (runtime/base.py)  ← Protocol
+        ├── ClaudeRuntimeFactory    → Claude Agent SDK subprocess
+        ├── OpenHandsRuntimeFactory → OpenHands SDK Conversation
+        └── DeepAgentsRuntimeFactory → Pydantic DeepAgents
 ```
 
-**Flow**: A2A request → DefaultRequestHandler → ClaudeAgentExecutor → HarnessClient → Claude Agent SDK → MessageConverter → A2A response
+**Flow**: A2A request → DefaultRequestHandler → ClaudeAgentExecutor → HarnessClient → AgentRuntime → SDK → A2A response
 
 ### Key Components
 
-- **FastHarness** (`app.py`): Main entry point. Registers agents, creates A2AFastAPIApplication with native SDK integration.
-- **HarnessClient** (`client.py`): Wraps ClaudeSDKClient. Provides `run()` for full execution and `stream()` for event-based iteration.
+- **FastHarness** (`app.py`): Main entry point. Registers agents, creates A2AFastAPIApplication with native SDK integration. Accepts optional `runtime_factory` for backend selection.
+- **HarnessClient** (`client.py`): Delegates to an `AgentRuntime`. Provides `run()` for full execution and `stream()` for event-based iteration.
+- **AgentRuntime / AgentRuntimeFactory** (`runtime/base.py`): Protocols that decouple execution from any specific SDK. Implementations in `runtime/claude.py`, `runtime/openhands.py`, `runtime/deepagents.py`.
 - **ClaudeAgentExecutor** (`worker/claude_executor.py`): Implements AgentExecutor interface. Handles task execution, context management, and error handling.
 - **MessageConverter** (`worker/converter.py`): Bidirectional conversion between Claude Agent SDK messages and A2A protocol format.
 

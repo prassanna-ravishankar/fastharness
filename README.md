@@ -9,9 +9,9 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Turn Claude Agent SDK agents into production-ready A2A services in minutes.**
+**Turn AI agents into production-ready A2A services — with pluggable runtime backends.**
 
-FastHarness wraps the Claude Agent SDK and automatically exposes your agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol. Define agents with decorators, and FastHarness handles protocol compliance, message conversion, task lifecycle, and multi-turn conversations.
+FastHarness exposes agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol. Define agents with decorators, pick a runtime backend (Claude, OpenHands, or Pydantic DeepAgents), and FastHarness handles protocol compliance, message conversion, task lifecycle, and multi-turn conversations.
 
 ```python
 from fastharness import FastHarness, Skill
@@ -31,7 +31,7 @@ app = harness.app  # Ready to deploy
 
 ## Why FastHarness?
 
-Building Claude agents is easy. Making them **interoperable** is hard:
+Building AI agents is easy. Making them **interoperable** is hard:
 
 | Without FastHarness | With FastHarness |
 |---------------------|------------------|
@@ -41,21 +41,44 @@ Building Claude agents is easy. Making them **interoperable** is hard:
 | Build conversation history tracking | **Multi-turn conversations out of the box** |
 | Create JSON-RPC endpoints | FastAPI endpoints ready |
 | Write agent card generation | Auto-generated agent cards |
+| Lock into one agent framework | **Pluggable runtime backends** |
 
 ## What FastHarness Adds
 
-On top of Claude Agent SDK + A2A SDK:
+On top of agent SDKs + A2A SDK:
 
-- **Multi-turn conversations** - Client pooling maintains conversation history across A2A requests
-- **Cost tracking** - Built-in telemetry callbacks for monitoring API usage
-- **Step logging** - Debug middleware for tool calls and intermediate steps
-- **Zero-config protocol bridge** - Decorator API handles all A2A protocol machinery
+- **Multi-turn conversations** — Runtime sessions maintain conversation history across A2A requests
+- **Pluggable runtimes** — Swap between Claude, OpenHands, and Pydantic DeepAgents backends
+- **Cost tracking** — Built-in telemetry callbacks for monitoring API usage
+- **Step logging** — Debug middleware for tool calls and intermediate steps
+- **Zero-config protocol bridge** — Decorator API handles all A2A protocol machinery
 
 ## Installation
 
 ```bash
+# Core (Claude Agent SDK backend)
 uv add fastharness
+
+# With OpenHands backend (requires Python 3.12+)
+uv add fastharness[openhands]
+
+# With Pydantic DeepAgents backend
+uv add fastharness[deepagents]
+
+# Both optional backends
+uv add fastharness[openhands,deepagents]
 ```
+
+## Environment Setup
+
+FastHarness automatically loads environment variables from a `.env` file in your project root at import time. Create one for API keys:
+
+```bash
+# .env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The Claude runtime uses the Claude Agent SDK subprocess (which handles auth via the `claude` CLI). The DeepAgents and OpenHands runtimes use API keys directly — set `ANTHROPIC_API_KEY` in `.env` or your shell environment.
 
 ## Quick Start
 
@@ -106,6 +129,91 @@ curl -X POST http://localhost:8000/ \
   }'
 ```
 
+## Runtime Backends
+
+FastHarness uses an `AgentRuntime` / `AgentRuntimeFactory` protocol system that decouples agent execution from any specific SDK. You can swap backends without changing your agent definitions.
+
+### Claude (default)
+
+Uses the Claude Agent SDK via subprocess. No API key needed if the `claude` CLI is configured.
+
+```python
+from fastharness import FastHarness
+
+harness = FastHarness(name="my-agent")  # ClaudeRuntimeFactory is the default
+```
+
+### OpenHands
+
+Uses the [OpenHands Software Agent SDK](https://docs.openhands.dev/sdk) for agents with terminal, file editing, and workspace capabilities.
+
+```bash
+uv add fastharness[openhands]
+```
+
+```python
+from fastharness import FastHarness
+from fastharness.runtime.openhands import OpenHandsRuntimeFactory
+
+harness = FastHarness(
+    name="dev-agent",
+    runtime_factory=OpenHandsRuntimeFactory(workspace="/path/to/project"),
+)
+```
+
+### Pydantic DeepAgents
+
+Uses [Pydantic DeepAgents](https://github.com/vstorm-co/pydantic-deepagents) for agents built on pydantic-ai with planning, subagents, and structured output.
+
+```bash
+uv add fastharness[deepagents]
+```
+
+```python
+from fastharness import FastHarness
+from fastharness.runtime.deepagents import DeepAgentsRuntimeFactory
+
+harness = FastHarness(
+    name="research-agent",
+    runtime_factory=DeepAgentsRuntimeFactory(),
+)
+```
+
+**Note:** DeepAgents requires `ANTHROPIC_API_KEY` (or the appropriate provider key) in your environment or `.env` file.
+
+### Custom Runtimes
+
+Implement the `AgentRuntime` and `AgentRuntimeFactory` protocols to add your own backend:
+
+```python
+from fastharness.runtime.base import AgentRuntime, AgentRuntimeFactory
+
+class MyRuntime:
+    async def run(self, prompt: str) -> Any:
+        """Execute prompt, return result."""
+        ...
+
+    async def stream(self, prompt: str) -> AsyncIterator[Event]:
+        """Execute prompt, yield events."""
+        ...
+
+    async def aclose(self) -> None:
+        """Cleanup resources."""
+        ...
+
+class MyRuntimeFactory:
+    async def get_or_create(self, session_key: str, config: AgentConfig) -> MyRuntime:
+        ...
+    async def remove(self, session_key: str) -> None:
+        ...
+    async def start_cleanup_task(self) -> None:
+        ...
+    async def shutdown(self) -> None:
+        ...
+
+harness = FastHarness(name="my-agent", runtime_factory=MyRuntimeFactory())
+```
+
 ## Multi-Turn Conversations
 
 FastHarness maintains conversation history automatically. Just use the same `contextId` on the message — this is the standard A2A conversation identifier:
@@ -119,8 +227,8 @@ FastHarness maintains conversation history automatically. Just use the same `con
 ```
 
 **How it works:**
-- All messages with the same `contextId` share history via the client pool
-- Claude SDK clients are pooled and reused for 15 minutes
+- All messages with the same `contextId` share history via the runtime session pool
+- Sessions are reused for 15 minutes by default (configurable via `ttl_minutes`)
 - No manual history management needed
 
 <details>
@@ -300,13 +408,14 @@ harness.agent(
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `system_prompt` | `None` | System prompt for Claude |
+| `system_prompt` | `None` | System prompt for the agent |
 | `tools` | `[]` | Allowed tools (`["Read", "Grep", "Glob"]`) |
-| `model` | `claude-sonnet-4-20250514` | Claude model |
+| `model` | `claude-sonnet-4-20250514` | Model identifier |
 | `max_turns` | `None` | Max conversation turns |
 | `mcp_servers` | `{}` | MCP server configs |
 | `setting_sources` | `["project"]` | Load CLAUDE.md automatically |
 | `output_format` | `None` | JSON schema for structured output |
+| `runtime` | `None` | Injected `AgentRuntime` (set by factory) |
 
 Override per-call:
 ```python
@@ -320,6 +429,28 @@ result = await client.run(prompt, model="claude-opus-4-20250514", max_turns=5)
 | `/.well-known/agent-card.json` | Agent metadata and capabilities |
 | `/` | JSON-RPC endpoint (`message/send`, `tasks/get`) |
 | `/docs` | Interactive API documentation |
+
+## Architecture
+
+```
+FastHarness (app.py)
+    │
+    ├── Decorators: .agent() and .agentloop()
+    │   └── Register agents with skills, tools, system prompts
+    │
+    ├── A2AFastAPIApplication (native A2A SDK)
+    │   └── Exposes A2A endpoints: /.well-known/agent-card.json, JSON-RPC /
+    │
+    ├── ClaudeAgentExecutor (worker/claude_executor.py)
+    │   └── Executes tasks using HarnessClient → AgentRuntime
+    │
+    └── AgentRuntimeFactory (runtime/base.py)  ← Protocol
+        ├── ClaudeRuntimeFactory    → Claude Agent SDK subprocess
+        ├── OpenHandsRuntimeFactory → OpenHands SDK Conversation
+        └── DeepAgentsRuntimeFactory → Pydantic DeepAgents
+```
+
+**Flow**: A2A request → DefaultRequestHandler → ClaudeAgentExecutor → HarnessClient → AgentRuntime → SDK → A2A response
 
 ## Examples
 
@@ -351,5 +482,5 @@ MIT © [Prassanna Ravishankar](https://github.com/prassanna-ravishankar)
 ---
 
 <p align="center">
-  <i>Built for the Claude Agent SDK community</i>
+  <i>Built for the AI agent community</i>
 </p>
