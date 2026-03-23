@@ -122,5 +122,6 @@ class OpenHandsRuntimeFactory(BaseSessionFactory):
         return _OHSession(conversation=conversation, agent=agent)
 
     def _build_runtime(self, entry: SessionEntry) -> OpenHandsRuntime:
-        assert isinstance(entry, _OHSession)
+        if not isinstance(entry, _OHSession):
+            raise TypeError(f"Expected _OHSession, got {type(entry).__name__}")
         return OpenHandsRuntime(entry.conversation)

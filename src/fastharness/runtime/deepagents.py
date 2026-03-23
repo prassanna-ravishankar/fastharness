@@ -120,5 +120,6 @@ class DeepAgentsRuntimeFactory(BaseSessionFactory):
         return _DeepSession(agent=agent, deps=deps)
 
     def _build_runtime(self, entry: SessionEntry) -> DeepAgentsRuntime:
-        assert isinstance(entry, _DeepSession)
+        if not isinstance(entry, _DeepSession):
+            raise TypeError(f"Expected _DeepSession, got {type(entry).__name__}")
         return DeepAgentsRuntime(entry.agent, entry.deps, entry.message_history)

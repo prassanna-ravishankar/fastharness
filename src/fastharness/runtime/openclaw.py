@@ -119,5 +119,6 @@ class OpenClawRuntimeFactory(BaseSessionFactory):
         return _OpenClawSession(client=client, agent=agent, conversation=conversation)
 
     def _build_runtime(self, entry: SessionEntry) -> OpenClawRuntime:
-        assert isinstance(entry, _OpenClawSession)
+        if not isinstance(entry, _OpenClawSession):
+            raise TypeError(f"Expected _OpenClawSession, got {type(entry).__name__}")
         return OpenClawRuntime(entry.agent, entry.conversation, entry.client)
