@@ -299,13 +299,21 @@ class FastHarness:
             queue_manager=None,  # Use SDK default (InMemoryQueueManager)
         )
 
-        # Build FastAPI app with A2A endpoints
+        # Build FastAPI app with auto-wired lifespan for cleanup/shutdown
         a2a_app = A2AFastAPIApplication(
             agent_card=agent_card,
             http_handler=handler,
         )
 
-        app = a2a_app.build()
+        @asynccontextmanager
+        async def _lifespan(app: "FastAPI") -> AsyncIterator[None]:
+            await self._startup()
+            try:
+                yield
+            finally:
+                await self._shutdown()
+
+        app = a2a_app.build(lifespan=_lifespan)
         self._add_health_routes(app)
         return app
 
@@ -328,14 +336,45 @@ class FastHarness:
                 status_code=status_code,
             )
 
+    async def _startup(self) -> None:
+        """Start background tasks (cleanup, etc)."""
+        if hasattr(self, "_executor"):
+            await self._executor.runtime_factory.start_cleanup_task()
+        logger.info("FastHarness started", extra={"agents": len(self._agents)})
+
+    async def _shutdown(self, timeout: float = 30.0) -> None:
+        """Drain in-flight tasks and shut down runtimes."""
+        logger.info("FastHarness shutting down...")
+
+        if hasattr(self, "_executor"):
+            running = self._executor._running_tasks
+            if running:
+                logger.info(
+                    "Waiting for in-flight tasks",
+                    extra={"count": len(running), "timeout": timeout},
+                )
+                tasks = list(running.values())
+                _, pending = await asyncio.wait(tasks, timeout=timeout)
+                if pending:
+                    logger.warning(
+                        "Force-cancelling remaining tasks",
+                        extra={"count": len(pending)},
+                    )
+                    for t in pending:
+                        t.cancel()
+
+            await self._executor.runtime_factory.shutdown()
+
+        logger.info("FastHarness shutdown complete")
+
     @asynccontextmanager
     async def lifespan_context(
         self, shutdown_timeout: float = 30.0
     ) -> AsyncIterator[None]:
-        """Context manager to start the harness components.
+        """Context manager for manual lifespan management.
 
-        Use this when mounting FastHarness on another FastAPI app.
-        The parent app's lifespan should wrap this context manager.
+        Use when mounting FastHarness on another FastAPI app. Not needed
+        when using ``harness.app`` directly (lifespan is auto-wired).
 
         Args:
             shutdown_timeout: Seconds to wait for in-flight tasks before forcing shutdown.
@@ -351,41 +390,12 @@ class FastHarness:
             app.mount("/agents", harness.app)
             ```
         """
-        # Ensure app is created
         _ = self.app
-
-        # Start runtime factory cleanup task
-        if hasattr(self, "_executor"):
-            await self._executor.runtime_factory.start_cleanup_task()
-
-        logger.info("FastHarness started", extra={"agents": len(self._agents)})
-
+        await self._startup()
         try:
             yield
         finally:
-            logger.info("FastHarness shutting down...")
-
-            if hasattr(self, "_executor"):
-                # Drain in-flight tasks with timeout
-                running = self._executor._running_tasks
-                if running:
-                    logger.info(
-                        "Waiting for in-flight tasks",
-                        extra={"count": len(running), "timeout": shutdown_timeout},
-                    )
-                    tasks = list(running.values())
-                    _, pending = await asyncio.wait(tasks, timeout=shutdown_timeout)
-                    if pending:
-                        logger.warning(
-                            "Force-cancelling remaining tasks",
-                            extra={"count": len(pending)},
-                        )
-                        for t in pending:
-                            t.cancel()
-
-                await self._executor.runtime_factory.shutdown()
-
-            logger.info("FastHarness shutdown complete")
+            await self._shutdown(timeout=shutdown_timeout)
 
     @property
     def app(self) -> "FastAPI":

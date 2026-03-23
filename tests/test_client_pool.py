@@ -74,6 +74,13 @@ class TestHashOptions:
 class TestClientPool:
     """Test client pool behavior."""
 
+    def test_ttl_validation(self):
+        """TTL must be >= 1."""
+        with pytest.raises(ValueError, match="ttl_minutes must be >= 1"):
+            ClientPool(ttl_minutes=0)
+        with pytest.raises(ValueError, match="ttl_minutes must be >= 1"):
+            ClientPool(ttl_minutes=-1)
+
     @pytest.mark.asyncio
     async def test_create_new_client(self, base_options, monkeypatch):
         """Test creating a new client in the pool."""
