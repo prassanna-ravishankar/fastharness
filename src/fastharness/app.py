@@ -1,5 +1,6 @@
 """FastHarness - Wrap Claude Agent SDK and expose agents as A2A services."""
 
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
@@ -263,7 +264,10 @@ class FastHarness:
     def _create_app(self) -> "FastAPI":
         """Create the FastAPI application with native A2A SDK."""
         if not self._agents:
-            logger.warning("Creating app with no registered agents")
+            raise RuntimeError(
+                "No agents registered. Call harness.agent() or @harness.agentloop() "
+                "before accessing harness.app"
+            )
         registry = AgentRegistry(agents=self._agents)
 
         # Create AgentCard
@@ -301,14 +305,40 @@ class FastHarness:
             http_handler=handler,
         )
 
-        return a2a_app.build()
+        app = a2a_app.build()
+        self._add_health_routes(app)
+        return app
+
+    def _add_health_routes(self, app: "FastAPI") -> None:
+        """Add health/readiness endpoints for orchestrator probes."""
+        from fastapi.responses import JSONResponse
+
+        @app.get("/health")
+        async def health() -> JSONResponse:
+            return JSONResponse({"status": "ok"})
+
+        @app.get("/readiness")
+        async def readiness() -> JSONResponse:
+            agents = len(self._agents)
+            has_executor = hasattr(self, "_executor")
+            ready = agents > 0 and has_executor
+            status_code = 200 if ready else 503
+            return JSONResponse(
+                {"ready": ready, "agents": agents},
+                status_code=status_code,
+            )
 
     @asynccontextmanager
-    async def lifespan_context(self) -> AsyncIterator[None]:
+    async def lifespan_context(
+        self, shutdown_timeout: float = 30.0
+    ) -> AsyncIterator[None]:
         """Context manager to start the harness components.
 
         Use this when mounting FastHarness on another FastAPI app.
         The parent app's lifespan should wrap this context manager.
+
+        Args:
+            shutdown_timeout: Seconds to wait for in-flight tasks before forcing shutdown.
 
         Example:
             ```python
@@ -328,12 +358,34 @@ class FastHarness:
         if hasattr(self, "_executor"):
             await self._executor.runtime_factory.start_cleanup_task()
 
+        logger.info("FastHarness started", extra={"agents": len(self._agents)})
+
         try:
             yield
         finally:
-            # Shutdown runtime factory on app shutdown
+            logger.info("FastHarness shutting down...")
+
             if hasattr(self, "_executor"):
+                # Drain in-flight tasks with timeout
+                running = self._executor._running_tasks
+                if running:
+                    logger.info(
+                        "Waiting for in-flight tasks",
+                        extra={"count": len(running), "timeout": shutdown_timeout},
+                    )
+                    tasks = list(running.values())
+                    _, pending = await asyncio.wait(tasks, timeout=shutdown_timeout)
+                    if pending:
+                        logger.warning(
+                            "Force-cancelling remaining tasks",
+                            extra={"count": len(pending)},
+                        )
+                        for t in pending:
+                            t.cancel()
+
                 await self._executor.runtime_factory.shutdown()
+
+            logger.info("FastHarness shutdown complete")
 
     @property
     def app(self) -> "FastAPI":

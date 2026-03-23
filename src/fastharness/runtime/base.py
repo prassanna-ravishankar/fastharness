@@ -76,6 +76,8 @@ class BaseSessionFactory:
     """
 
     def __init__(self, ttl_minutes: int = 15, *, logger: logging.Logger) -> None:
+        if ttl_minutes < 1:
+            raise ValueError(f"ttl_minutes must be >= 1, got {ttl_minutes}")
         self._ttl_minutes = ttl_minutes
         self._sessions: dict[str, SessionEntry] = {}
         self._lock = asyncio.Lock()

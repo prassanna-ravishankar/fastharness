@@ -66,6 +66,8 @@ class ClientPool:
         Args:
             ttl_minutes: Time-to-live for idle clients (default 15 minutes)
         """
+        if ttl_minutes < 1:
+            raise ValueError(f"ttl_minutes must be >= 1, got {ttl_minutes}")
         self._pool: dict[str, ClientPoolEntry] = {}
         self._lock = asyncio.Lock()
         self._ttl_minutes = ttl_minutes

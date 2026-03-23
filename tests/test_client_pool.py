@@ -188,6 +188,8 @@ class TestClientPool:
     @pytest.mark.asyncio
     async def test_stale_cleanup(self, base_options, monkeypatch):
         """Test that stale clients are cleaned up."""
+        from datetime import timedelta
+
         mock_client = MagicMock()
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock()
@@ -197,14 +199,11 @@ class TestClientPool:
 
         monkeypatch.setattr("fastharness.worker.client_pool.ClaudeSDKClient", mock_sdk_client)
 
-        # Use very short TTL for testing
-        pool = ClientPool(ttl_minutes=0)
+        pool = ClientPool(ttl_minutes=1)
 
-        # Create client
+        # Create client then backdate to make it stale
         await pool.get_or_create("ctx-1", base_options)
-
-        # Wait a bit to ensure it's stale
-        await asyncio.sleep(0.1)
+        pool._pool["ctx-1"].last_accessed -= timedelta(minutes=2)
 
         # Run cleanup
         await pool.cleanup_stale()
