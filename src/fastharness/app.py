@@ -84,6 +84,7 @@ class FastHarness:
         self._runtime_factory = runtime_factory
         self._agents: dict[str, Agent] = {}
         self._app: FastAPI | None = None
+        self._started = False
 
     def _convert_skills(self, skills: list[Skill]) -> list[A2ASkill]:
         """Convert FastHarness Skills to A2A Skills."""
@@ -337,13 +338,19 @@ class FastHarness:
             )
 
     async def _startup(self) -> None:
-        """Start background tasks (cleanup, etc)."""
+        """Start background tasks (cleanup, etc). Idempotent."""
+        if self._started:
+            return
+        self._started = True
         if hasattr(self, "_executor"):
             await self._executor.runtime_factory.start_cleanup_task()
         logger.info("FastHarness started", extra={"agents": len(self._agents)})
 
     async def _shutdown(self, timeout: float = 30.0) -> None:
-        """Drain in-flight tasks and shut down runtimes."""
+        """Drain in-flight tasks and shut down runtimes. Idempotent."""
+        if not self._started:
+            return
+        self._started = False
         logger.info("FastHarness shutting down...")
 
         if hasattr(self, "_executor"):
