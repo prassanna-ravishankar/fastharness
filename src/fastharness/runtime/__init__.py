@@ -1,9 +1,9 @@
 """AgentRuntime protocol and implementations.
 
-Claude runtime is always available. OpenHands and DeepAgents runtimes
-require their respective optional dependencies:
+Claude runtime is always available. Other runtimes require optional dependencies:
     pip install fastharness[openhands]
     pip install fastharness[deepagents]
+    pip install fastharness[openclaw]
 """
 
 from fastharness.runtime.base import (
@@ -28,6 +28,8 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "OpenHandsRuntimeFactory": ("fastharness.runtime.openhands", "OpenHandsRuntimeFactory"),
     "DeepAgentsRuntime": ("fastharness.runtime.deepagents", "DeepAgentsRuntime"),
     "DeepAgentsRuntimeFactory": ("fastharness.runtime.deepagents", "DeepAgentsRuntimeFactory"),
+    "OpenClawRuntime": ("fastharness.runtime.openclaw", "OpenClawRuntime"),
+    "OpenClawRuntimeFactory": ("fastharness.runtime.openclaw", "OpenClawRuntimeFactory"),
 }
 
 
