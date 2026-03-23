@@ -342,7 +342,7 @@ class FastHarness:
         if self._started:
             return
         self._started = True
-        if hasattr(self, "_executor"):
+        if hasattr(self, "_executor") and self._executor.runtime_factory is not None:
             await self._executor.runtime_factory.start_cleanup_task()
         logger.info("FastHarness started", extra={"agents": len(self._agents)})
 
@@ -353,8 +353,9 @@ class FastHarness:
         self._started = False
         logger.info("FastHarness shutting down...")
 
-        if hasattr(self, "_executor"):
-            running = self._executor._running_tasks
+        executor = getattr(self, "_executor", None)
+        if executor is not None:
+            running = executor._running_tasks
             if running:
                 logger.info(
                     "Waiting for in-flight tasks",
@@ -370,7 +371,8 @@ class FastHarness:
                     for t in pending:
                         t.cancel()
 
-            await self._executor.runtime_factory.shutdown()
+            if executor.runtime_factory is not None:
+                await executor.runtime_factory.shutdown()
 
         logger.info("FastHarness shutdown complete")
 
