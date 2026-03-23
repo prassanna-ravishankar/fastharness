@@ -150,3 +150,25 @@ async def test_multiple_agents_skills_aggregated() -> None:
     assert "help" in skill_ids
     assert "research" in skill_ids
     assert "analyze" in skill_ids
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint(test_harness: FastHarness) -> None:
+    """Test that health endpoint returns 200."""
+    async with app_client(test_harness) as client:
+        response = await client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+@pytest.mark.asyncio
+async def test_readiness_endpoint(test_harness: FastHarness) -> None:
+    """Test that readiness endpoint reports ready when agents are registered."""
+    async with app_client(test_harness) as client:
+        response = await client.get("/readiness")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ready"] is True
+    assert data["agents"] >= 1

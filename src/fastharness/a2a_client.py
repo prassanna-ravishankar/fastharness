@@ -139,8 +139,9 @@ class FastHarnessClient:
             if event is None:
                 continue
             # Artifact update — extract text chunks
-            if hasattr(event, "artifact"):
-                chunk = MessageConverter.extract_text_from_parts(event.artifact.parts)
+            artifact = getattr(event, "artifact", None)
+            if artifact is not None:
+                chunk = MessageConverter.extract_text_from_parts(artifact.parts)
                 if chunk:
                     yield chunk
 

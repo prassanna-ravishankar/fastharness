@@ -367,6 +367,22 @@ class TestBaseSessionFactory:
         assert not entry.is_stale(15)  # just created
         assert entry.is_stale(0)  # 0 TTL → always stale
 
+    def test_ttl_validation_rejects_zero(self) -> None:
+        import logging
+
+        from fastharness.runtime.base import BaseSessionFactory
+
+        with pytest.raises(ValueError, match="ttl_minutes must be >= 1"):
+            BaseSessionFactory(ttl_minutes=0, logger=logging.getLogger("test"))
+
+    def test_ttl_validation_rejects_negative(self) -> None:
+        import logging
+
+        from fastharness.runtime.base import BaseSessionFactory
+
+        with pytest.raises(ValueError, match="ttl_minutes must be >= 1"):
+            BaseSessionFactory(ttl_minutes=-5, logger=logging.getLogger("test"))
+
     def test_session_entry_touch(self) -> None:
         from datetime import timedelta
 

@@ -267,10 +267,10 @@ class TestFastHarness:
         assert harness._agents["helper"].config.description == "Second"
         assert len(harness._agents) == 1
 
-    def test_app_without_agents_still_works(self) -> None:
+    def test_app_without_agents_raises(self) -> None:
         harness = FastHarness(name="empty")
-        app = harness.app
-        assert app is not None
+        with pytest.raises(RuntimeError, match="No agents registered"):
+            _ = harness.app
 
 
 class TestMessageConverter:

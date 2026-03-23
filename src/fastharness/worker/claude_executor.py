@@ -141,6 +141,7 @@ class ClaudeAgentExecutor(AgentExecutor):
             from fastharness.runtime.claude import ClaudeRuntimeFactory
 
             self.runtime_factory = ClaudeRuntimeFactory(ttl_minutes=15)
+        assert self.runtime_factory is not None  # guaranteed after __post_init__
 
     def build_message_history(self, history: list[Message]) -> list[Any]:
         """Convert A2A message history to Claude SDK format."""

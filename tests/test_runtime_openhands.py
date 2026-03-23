@@ -1,6 +1,5 @@
 """Tests for OpenHands runtime implementation (mocked — no SDK dependency needed)."""
 
-import asyncio
 import sys
 from types import ModuleType
 from unittest.mock import MagicMock
@@ -190,17 +189,20 @@ class TestOpenHandsRuntimeFactory:
 
     @pytest.mark.asyncio
     async def test_stale_cleanup(self, mock_openhands_sdk):
+        from datetime import timedelta
+
         from fastharness.runtime.openhands import OpenHandsRuntimeFactory
 
-        factory = OpenHandsRuntimeFactory(ttl_minutes=0)  # Immediate TTL
+        factory = OpenHandsRuntimeFactory(ttl_minutes=1)
         config = _make_config()
 
         await factory.get_or_create("s1", config)
-        await asyncio.sleep(0.05)
 
-        # Manually trigger cleanup
+        # Backdate to make stale
+        factory._sessions["s1"].last_accessed -= timedelta(minutes=2)
+
         async with factory._lock:
-            stale = [k for k, v in factory._sessions.items() if v.is_stale(0)]
+            stale = [k for k, v in factory._sessions.items() if v.is_stale(1)]
             for key in stale:
                 factory._sessions.pop(key)
 
