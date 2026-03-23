@@ -40,9 +40,10 @@ FastHarness (app.py)
     │   └── Executes tasks using HarnessClient → AgentRuntime
     │
     └── AgentRuntimeFactory (runtime/base.py)  ← Protocol
-        ├── ClaudeRuntimeFactory    → Claude Agent SDK subprocess
-        ├── OpenHandsRuntimeFactory → OpenHands SDK Conversation
-        └── DeepAgentsRuntimeFactory → Pydantic DeepAgents
+        ├── ClaudeRuntimeFactory     → Claude Agent SDK subprocess
+        ├── OpenHandsRuntimeFactory  → OpenHands SDK Conversation
+        ├── DeepAgentsRuntimeFactory → Pydantic DeepAgents
+        └── OpenClawRuntimeFactory   → OpenClaw gateway (via bridge)
 ```
 
 **Flow**: A2A request → DefaultRequestHandler → ClaudeAgentExecutor → HarnessClient → AgentRuntime → SDK → A2A response
