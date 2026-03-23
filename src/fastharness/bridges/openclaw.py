@@ -68,18 +68,23 @@ class OpenClawRuntime:
         return result.content
 
     async def stream(self, prompt: str) -> AsyncIterator[Event]:
-        """Stream typed events from the OpenClaw agent."""
-        stream = await self._agent.execute_stream_typed(prompt)
-        final_text: str | None = None
+        """Stream typed events from the OpenClaw agent.
+
+        Uses the conversation object to preserve multi-turn history,
+        falling back to direct agent streaming for the event stream.
+        """
+        # Send via conversation to maintain server-side history
+        stream = await self._conversation.stream(prompt)
+        chunks: list[str] = []
         metrics: dict[str, Any] = {}
 
         async for event in stream:
+            # Use class name for dispatch — SDK types are behind try/except
             event_cls = type(event).__name__
 
             if event_cls == "ContentEvent":
-                text = event.text
-                final_text = text
-                yield TextEvent(text=text)
+                chunks.append(event.text)
+                yield TextEvent(text=event.text)
 
             elif event_cls == "ToolCallEvent":
                 yield ToolEvent(
@@ -88,15 +93,14 @@ class OpenClawRuntime:
                 )
 
             elif event_cls == "DoneEvent":
-                if hasattr(event, "content") and event.content:
-                    final_text = event.content
+                final = getattr(event, "content", None) or "".join(chunks)
                 token_usage = getattr(event, "token_usage", None)
                 if token_usage:
                     metrics = {
                         "input_tokens": getattr(token_usage, "input_tokens", None),
                         "output_tokens": getattr(token_usage, "output_tokens", None),
                     }
-                yield DoneEvent(final_text=final_text, metrics=metrics)
+                yield DoneEvent(final_text=final, metrics=metrics)
                 return
 
             elif event_cls == "ErrorEvent":
@@ -104,7 +108,7 @@ class OpenClawRuntime:
                 raise RuntimeError(f"OpenClaw agent error: {msg}")
 
         # Stream ended without DoneEvent
-        yield DoneEvent(final_text=final_text, metrics=metrics)
+        yield DoneEvent(final_text="".join(chunks), metrics=metrics)
 
     async def aclose(self) -> None:
         """Nothing to close — client lifecycle managed by factory."""
