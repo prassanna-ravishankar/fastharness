@@ -99,14 +99,18 @@ class OpenClawRuntimeFactory(BaseSessionFactory):
         super().__init__(ttl_minutes=ttl_minutes, logger=logger)
         self._gateway_url = gateway_url
 
-    async def _create_session(self, config: AgentConfig) -> _OpenClawSession:
+    async def _create_session(
+        self, config: AgentConfig, session_key: str = ""
+    ) -> _OpenClawSession:
         connect_kwargs: dict[str, Any] = {}
         if self._gateway_url:
             connect_kwargs["gateway_ws_url"] = self._gateway_url
 
         client = await OpenClawClient.connect(**connect_kwargs)
         agent = client.get_agent(config.name)
-        conversation = agent.conversation(f"fastharness:{config.name}")
+        # Use session_key for conversation ID to isolate sessions per user+context
+        conv_id = f"fastharness:{session_key}" if session_key else f"fastharness:{config.name}"
+        conversation = agent.conversation(conv_id)
 
         logger.info(
             "Connected to OpenClaw agent",

@@ -305,7 +305,9 @@ class TestBaseSessionFactory:
         class StubFactory(BaseSessionFactory):
             create_count: int = 0
 
-            async def _create_session(self, config: AgentConfig) -> StubSession:
+            async def _create_session(
+                self, config: AgentConfig, session_key: str = ""
+            ) -> StubSession:
                 self.create_count += 1
                 return StubSession()
 

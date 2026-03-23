@@ -109,7 +109,7 @@ class OpenHandsRuntimeFactory(BaseSessionFactory):
         super().__init__(ttl_minutes=ttl_minutes, logger=logger)
         self._workspace = workspace
 
-    async def _create_session(self, config: AgentConfig) -> _OHSession:
+    async def _create_session(self, config: AgentConfig, session_key: str = "") -> _OHSession:
         agent = _config_to_agent(config)
 
         kwargs: dict[str, Any] = {"agent": agent}

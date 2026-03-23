@@ -114,7 +114,7 @@ class DeepAgentsRuntimeFactory(BaseSessionFactory):
     def __init__(self, ttl_minutes: int = 15) -> None:
         super().__init__(ttl_minutes=ttl_minutes, logger=logger)
 
-    async def _create_session(self, config: AgentConfig) -> _DeepSession:
+    async def _create_session(self, config: AgentConfig, session_key: str = "") -> _DeepSession:
         agent = _create_agent(config)
         deps = DeepAgentDeps(backend=StateBackend())
         return _DeepSession(agent=agent, deps=deps)
