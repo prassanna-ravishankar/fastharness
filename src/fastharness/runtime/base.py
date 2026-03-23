@@ -86,7 +86,9 @@ class BaseSessionFactory:
 
     # -- Template methods (override in subclasses) --------------------------
 
-    async def _create_session(self, config: AgentConfig) -> SessionEntry:
+    async def _create_session(
+        self, config: AgentConfig, session_key: str = ""
+    ) -> SessionEntry:
         """Create a new SessionEntry for the given config."""
         raise NotImplementedError
 
@@ -104,7 +106,7 @@ class BaseSessionFactory:
                 self._log.info("Reusing session", extra={"session_key": session_key})
                 return self._build_runtime(entry)
 
-            entry = await self._create_session(config)
+            entry = await self._create_session(config, session_key=session_key)
             self._sessions[session_key] = entry
             self._log.info("Created new session", extra={"session_key": session_key})
             return self._build_runtime(entry)

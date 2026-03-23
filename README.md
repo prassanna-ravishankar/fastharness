@@ -11,7 +11,7 @@
 
 **Turn AI agents into production-ready A2A services — with pluggable runtime backends.**
 
-FastHarness exposes agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol. Define agents with decorators, pick a runtime backend (Claude, OpenHands, or Pydantic DeepAgents), and FastHarness handles protocol compliance, message conversion, task lifecycle, and multi-turn conversations.
+FastHarness exposes agents through Google's [A2A (Agent-to-Agent)](https://a2a-protocol.org) protocol. Define agents with decorators, pick a runtime backend (Claude, OpenHands, Pydantic DeepAgents), or bridge existing agents (OpenClaw), and FastHarness handles protocol compliance, message conversion, task lifecycle, and multi-turn conversations.
 
 ```python
 from fastharness import FastHarness, Skill
@@ -48,7 +48,7 @@ Building AI agents is easy. Making them **interoperable** is hard:
 On top of agent SDKs + A2A SDK:
 
 - **Multi-turn conversations** — Runtime sessions maintain conversation history across A2A requests
-- **Pluggable runtimes** — Swap between Claude, OpenHands, and Pydantic DeepAgents backends
+- **Pluggable runtimes** — Swap between Claude, OpenHands, Pydantic DeepAgents, and OpenClaw backends
 - **Cost tracking** — Built-in telemetry callbacks for monitoring API usage
 - **Step logging** — Debug middleware for tool calls and intermediate steps
 - **Zero-config protocol bridge** — Decorator API handles all A2A protocol machinery
@@ -65,8 +65,11 @@ uv add fastharness[openhands]
 # With Pydantic DeepAgents backend
 uv add fastharness[deepagents]
 
-# Both optional backends
-uv add fastharness[openhands,deepagents]
+# OpenClaw bridge (expose existing OpenClaw agents as A2A)
+uv add fastharness[openclaw]
+
+# All optional backends
+uv add fastharness[openhands,deepagents,openclaw]
 ```
 
 ## Environment Setup
@@ -223,6 +226,31 @@ harness = FastHarness(
 ```
 
 **Note:** DeepAgents requires `ANTHROPIC_API_KEY` (or the appropriate provider key) in your environment or `.env` file.
+
+### OpenClaw Bridge
+
+Already running agents on [OpenClaw](https://openclaw.ai)? Expose them as A2A endpoints without rewriting anything:
+
+```bash
+uv add fastharness[openclaw]
+```
+
+```python
+from fastharness.bridges.openclaw import OpenClawBridge
+
+bridge = OpenClawBridge("ws://localhost:18789")  # your OpenClaw gateway
+
+# One-liner: single agent
+app = bridge.expose("research-bot", description="Research assistant")
+
+# Multiple agents on one service
+harness = bridge.to_harness("my-agents")
+bridge.add_agent(harness, "research-bot", description="Research")
+bridge.add_agent(harness, "coder-bot", description="Coding assistant")
+app = harness.app
+```
+
+Your OpenClaw agents get A2A protocol compliance, streaming, multi-turn conversations, and health endpoints — zero changes to the agents themselves.
 
 ### Custom Runtimes
 
@@ -488,9 +516,10 @@ FastHarness (app.py)
     │   └── Executes tasks using HarnessClient → AgentRuntime
     │
     └── AgentRuntimeFactory (runtime/base.py)  ← Protocol
-        ├── ClaudeRuntimeFactory    → Claude Agent SDK subprocess
-        ├── OpenHandsRuntimeFactory → OpenHands SDK Conversation
-        └── DeepAgentsRuntimeFactory → Pydantic DeepAgents
+        ├── ClaudeRuntimeFactory     → Claude Agent SDK subprocess
+        ├── OpenHandsRuntimeFactory  → OpenHands SDK Conversation
+        ├── DeepAgentsRuntimeFactory → Pydantic DeepAgents
+        └── OpenClawRuntimeFactory   → OpenClaw gateway (via bridge)
 ```
 
 **Flow**: A2A request → DefaultRequestHandler → ClaudeAgentExecutor → HarnessClient → AgentRuntime → SDK → A2A response

@@ -109,7 +109,7 @@ class OpenHandsRuntimeFactory(BaseSessionFactory):
         super().__init__(ttl_minutes=ttl_minutes, logger=logger)
         self._workspace = workspace
 
-    async def _create_session(self, config: AgentConfig) -> _OHSession:
+    async def _create_session(self, config: AgentConfig, session_key: str = "") -> _OHSession:
         agent = _config_to_agent(config)
 
         kwargs: dict[str, Any] = {"agent": agent}
@@ -122,5 +122,6 @@ class OpenHandsRuntimeFactory(BaseSessionFactory):
         return _OHSession(conversation=conversation, agent=agent)
 
     def _build_runtime(self, entry: SessionEntry) -> OpenHandsRuntime:
-        assert isinstance(entry, _OHSession)
+        if not isinstance(entry, _OHSession):
+            raise TypeError(f"Expected _OHSession, got {type(entry).__name__}")
         return OpenHandsRuntime(entry.conversation)
