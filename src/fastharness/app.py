@@ -117,6 +117,7 @@ class FastHarness:
         tools: list[str] | None = None,
         max_turns: int | None = None,
         model: str = "claude-sonnet-4-20250514",
+        custom_tools: list[Any] | None = None,
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
         output_format: dict[str, Any] | None = None,
@@ -133,6 +134,7 @@ class FastHarness:
             tools=tools or [],
             max_turns=max_turns,
             model=model,
+            custom_tools=custom_tools or [],
             mcp_servers=mcp_servers or {},
             setting_sources=setting_sources if setting_sources is not None else ["project"],
             output_format=output_format,
@@ -164,6 +166,7 @@ class FastHarness:
         tools: list[str] | None = None,
         max_turns: int | None = None,
         model: str = "claude-sonnet-4-20250514",
+        custom_tools: list[Any] | None = None,
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
         output_format: dict[str, Any] | None = None,
@@ -180,6 +183,7 @@ class FastHarness:
             tools: List of allowed tool names (e.g., ["Read", "Grep", "Glob"]).
             max_turns: Maximum number of turns.
             model: Claude model to use.
+            custom_tools: List of pydantic-ai Tool objects (for DeepAgents runtime).
             mcp_servers: MCP servers to connect (dict of name -> config).
             setting_sources: Filesystem setting sources to load (["project"] loads CLAUDE.md).
             output_format: JSON schema for structured output
@@ -196,6 +200,7 @@ class FastHarness:
             tools=tools,
             max_turns=max_turns,
             model=model,
+            custom_tools=custom_tools,
             mcp_servers=mcp_servers,
             setting_sources=setting_sources,
             output_format=output_format,
@@ -210,6 +215,7 @@ class FastHarness:
         tools: list[str] | None = None,
         max_turns: int | None = None,
         model: str = "claude-sonnet-4-20250514",
+        custom_tools: list[Any] | None = None,
         mcp_servers: dict[str, Any] | None = None,
         setting_sources: list[str] | None = None,
         output_format: dict[str, Any] | None = None,
@@ -255,6 +261,7 @@ class FastHarness:
                 tools=tools,
                 max_turns=max_turns,
                 model=model,
+                custom_tools=custom_tools,
                 mcp_servers=mcp_servers,
                 setting_sources=setting_sources,
                 output_format=output_format,

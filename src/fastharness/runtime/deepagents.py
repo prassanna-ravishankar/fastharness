@@ -48,6 +48,8 @@ def _create_agent(config: AgentConfig) -> Any:
         kwargs["model"] = config.model
     if config.system_prompt:
         kwargs["instructions"] = config.system_prompt
+    if config.custom_tools:
+        kwargs["tools"] = config.custom_tools
     return create_deep_agent(**kwargs)
 
 
