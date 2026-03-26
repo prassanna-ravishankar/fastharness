@@ -16,20 +16,12 @@ Requires: pip install fastharness[redis]
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from a2a.server.tasks.task_store import TaskStore
 from a2a.types import Task
 
 from fastharness.logging import get_logger
-
-try:
-    import redis.asyncio as aioredis
-except ImportError as e:
-    raise ImportError(
-        "Redis is required for RedisTaskStore. "
-        "Install with: pip install fastharness[redis]"
-    ) from e
 
 if TYPE_CHECKING:
     from a2a.server.context import ServerCallContext
@@ -51,7 +43,7 @@ class RedisTaskStore(TaskStore):
         url: str = "redis://localhost:6379",
         ttl_seconds: int = 3600,
         key_prefix: str = _KEY_PREFIX,
-        **redis_kwargs,
+        **redis_kwargs: Any,
     ) -> None:
         """Initialize the Redis task store.
 
@@ -60,11 +52,20 @@ class RedisTaskStore(TaskStore):
             ttl_seconds: Time-to-live for task keys (default 1 hour).
                 Set to 0 to disable expiration.
             key_prefix: Key prefix for task storage.
-            **redis_kwargs: Extra kwargs passed to redis.asyncio.from_url().
+            **redis_kwargs: Extra kwargs passed to redis.asyncio.from_url()
+                (e.g. max_connections for pool sizing).
         """
+        try:
+            import redis.asyncio as aioredis
+        except ImportError as e:
+            raise ImportError(
+                "Redis is required for RedisTaskStore. "
+                "Install with: pip install fastharness[redis]"
+            ) from e
+
         if ttl_seconds < 0:
             raise ValueError(f"ttl_seconds must be >= 0, got {ttl_seconds}")
-        self._client = aioredis.from_url(url, decode_responses=True, **redis_kwargs)
+        self._client = aioredis.from_url(url, **redis_kwargs)
         self._ttl = ttl_seconds
         self._prefix = key_prefix
 
@@ -86,15 +87,18 @@ class RedisTaskStore(TaskStore):
     async def get(
         self, task_id: str, context: ServerCallContext | None = None
     ) -> Task | None:
-        """Retrieve a task from Redis. Returns None if expired or missing."""
-        data = await self._client.get(self._key(task_id))
+        """Retrieve a task from Redis. Returns None if expired or missing.
+
+        Uses GETEX to atomically fetch and refresh TTL in a single round-trip.
+        """
+        key = self._key(task_id)
+        if self._ttl > 0:
+            data = await self._client.getex(key, ex=self._ttl)
+        else:
+            data = await self._client.get(key)
         if data is None:
             return None
-        task = Task.model_validate_json(data)
-        # Touch TTL on read to keep active sessions alive
-        if self._ttl > 0:
-            await self._client.expire(self._key(task_id), self._ttl)
-        return task
+        return Task.model_validate_json(data)
 
     async def delete(
         self, task_id: str, context: ServerCallContext | None = None
@@ -106,3 +110,9 @@ class RedisTaskStore(TaskStore):
     async def close(self) -> None:
         """Close the Redis connection."""
         await self._client.aclose()
+
+    async def __aenter__(self) -> RedisTaskStore:
+        return self
+
+    async def __aexit__(self, *exc: Any) -> None:
+        await self.close()

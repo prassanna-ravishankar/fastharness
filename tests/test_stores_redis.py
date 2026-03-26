@@ -40,8 +40,8 @@ def mock_redis(monkeypatch):
     mock_client.setex = AsyncMock()
     mock_client.set = AsyncMock()
     mock_client.get = AsyncMock(return_value=None)
+    mock_client.getex = AsyncMock(return_value=None)
     mock_client.delete = AsyncMock()
-    mock_client.expire = AsyncMock()
     mock_client.aclose = AsyncMock()
 
     aioredis_mod.from_url = MagicMock(return_value=mock_client)
@@ -69,7 +69,6 @@ class TestRedisTaskStore:
         args = mock_redis.setex.call_args[0]
         assert args[0] == "fastharness:task:task-1"
         assert args[1] == 3600
-        # Third arg is JSON string
         assert "task-1" in args[2]
 
     @pytest.mark.asyncio
@@ -85,54 +84,44 @@ class TestRedisTaskStore:
         mock_redis.setex.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_returns_task(self, mock_redis):
+    async def test_get_uses_getex_with_ttl(self, mock_redis):
+        """get() should use GETEX to atomically fetch and refresh TTL."""
         from fastharness.stores.redis import RedisTaskStore
 
         task = _make_task()
-        mock_redis.get = AsyncMock(return_value=task.model_dump_json())
+        mock_redis.getex = AsyncMock(return_value=task.model_dump_json())
 
-        store = RedisTaskStore(url="redis://test:6379")
+        store = RedisTaskStore(url="redis://test:6379", ttl_seconds=3600)
         result = await store.get("task-1")
 
         assert result is not None
         assert result.id == "task-1"
-        assert result.context_id == "ctx-1"
-        assert len(result.history) == 2
+        mock_redis.getex.assert_called_once_with("fastharness:task:task-1", ex=3600)
+        mock_redis.get.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_get_returns_none_for_missing(self, mock_redis):
-        from fastharness.stores.redis import RedisTaskStore
-
-        mock_redis.get = AsyncMock(return_value=None)
-
-        store = RedisTaskStore(url="redis://test:6379")
-        result = await store.get("nonexistent")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_get_touches_ttl(self, mock_redis):
-        from fastharness.stores.redis import RedisTaskStore
-
-        task = _make_task()
-        mock_redis.get = AsyncMock(return_value=task.model_dump_json())
-
-        store = RedisTaskStore(url="redis://test:6379", ttl_seconds=3600)
-        await store.get("task-1")
-
-        mock_redis.expire.assert_called_once_with("fastharness:task:task-1", 3600)
-
-    @pytest.mark.asyncio
-    async def test_get_skips_ttl_touch_when_disabled(self, mock_redis):
+    async def test_get_uses_plain_get_without_ttl(self, mock_redis):
+        """get() with ttl_seconds=0 should use plain GET (no TTL refresh)."""
         from fastharness.stores.redis import RedisTaskStore
 
         task = _make_task()
         mock_redis.get = AsyncMock(return_value=task.model_dump_json())
 
         store = RedisTaskStore(url="redis://test:6379", ttl_seconds=0)
-        await store.get("task-1")
+        result = await store.get("task-1")
 
-        mock_redis.expire.assert_not_called()
+        assert result is not None
+        mock_redis.get.assert_called_once_with("fastharness:task:task-1")
+        mock_redis.getex.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_returns_none_for_missing(self, mock_redis):
+        from fastharness.stores.redis import RedisTaskStore
+
+        store = RedisTaskStore(url="redis://test:6379")
+        result = await store.get("nonexistent")
+
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_delete(self, mock_redis):
@@ -150,6 +139,14 @@ class TestRedisTaskStore:
         store = RedisTaskStore(url="redis://test:6379")
         await store.close()
 
+        mock_redis.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_async_context_manager(self, mock_redis):
+        from fastharness.stores.redis import RedisTaskStore
+
+        async with RedisTaskStore(url="redis://test:6379") as store:
+            assert store is not None
         mock_redis.aclose.assert_called_once()
 
     def test_ttl_validation(self, mock_redis):
@@ -177,7 +174,7 @@ class TestRedisTaskStore:
             stored_json = data
 
         mock_redis.setex = AsyncMock(side_effect=capture_setex)
-        mock_redis.get = AsyncMock(side_effect=lambda k: stored_json)
+        mock_redis.getex = AsyncMock(side_effect=lambda k, **kw: stored_json)
 
         store = RedisTaskStore(url="redis://test:6379")
 
