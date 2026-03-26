@@ -68,8 +68,11 @@ uv add fastharness[deepagents]
 # OpenClaw bridge (expose existing OpenClaw agents as A2A)
 uv add fastharness[openclaw]
 
+# Redis task store (for distributed/k8s deployments)
+uv add fastharness[redis]
+
 # All optional backends
-uv add fastharness[openhands,deepagents,openclaw]
+uv add fastharness[openhands,deepagents,openclaw,redis]
 ```
 
 ## Environment Setup
@@ -376,6 +379,39 @@ async def lifespan(app):
 app = FastAPI(lifespan=lifespan)
 app.mount("/agents", harness.app)
 ```
+
+## Distributed Deployment
+
+By default, FastHarness stores tasks in memory. For k8s or multi-pod deployments where conversations must survive pod restarts, use a persistent task store:
+
+```bash
+uv add fastharness[redis]
+```
+
+```python
+from fastharness import FastHarness
+from fastharness.stores.redis import RedisTaskStore
+
+store = RedisTaskStore("redis://redis:6379", ttl_seconds=3600)
+harness = FastHarness(name="my-agent", task_store=store)
+```
+
+The A2A SDK also provides `DatabaseTaskStore` for SQL backends:
+
+```bash
+uv add a2a-sdk[postgresql]
+```
+
+```python
+from sqlalchemy.ext.asyncio import create_async_engine
+from a2a.server.tasks.database_task_store import DatabaseTaskStore
+
+engine = create_async_engine("postgresql+asyncpg://user:pass@db:5432/agents")
+store = DatabaseTaskStore(engine)
+harness = FastHarness(name="my-agent", task_store=store)
+```
+
+Multi-turn conversations work across pods — the task store persists conversation history, and the runtime factory creates fresh SDK sessions on each pod as needed.
 
 ## Advanced Features
 
