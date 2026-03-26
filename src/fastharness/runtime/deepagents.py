@@ -54,12 +54,15 @@ def _create_agent(config: AgentConfig) -> Any:
     # create_deep_agent's built-in tool registration (agent.tool()) expects
     # RunContext[DeepAgentDeps] as the first param, but custom tools are plain
     # functions that don't need agent deps.
+    # create_deep_agent returns a MiddlewareAgent wrapping the real Agent —
+    # access the inner agent via .wrapped for tool registration.
     if config.custom_tools:
         from pydantic_ai import Tool
 
+        inner = agent.wrapped if hasattr(agent, "wrapped") else agent
         for tool in config.custom_tools:
             fn = tool.function if isinstance(tool, Tool) else tool
-            agent.tool_plain(fn)
+            inner.tool_plain(fn)
 
     return agent
 
