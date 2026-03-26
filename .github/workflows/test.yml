@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: astral-sh/setup-uv@v5
-      - run: uv sync --extra dev --extra openhands --extra deepagents --extra openclaw
+      - run: uv sync --extra dev --extra openhands --extra deepagents --extra openclaw --extra redis
       - run: uv run pytest
       - run: uv run ty check src/
       - run: uv run ruff check src/
