@@ -48,23 +48,19 @@ def _create_agent(config: AgentConfig) -> Any:
         kwargs["model"] = config.model
     if config.system_prompt:
         kwargs["instructions"] = config.system_prompt
-    agent = create_deep_agent(**kwargs)
-
-    # Register custom tools via tool_plain() to avoid RunContext requirement.
-    # create_deep_agent's built-in tool registration (agent.tool()) expects
-    # RunContext[DeepAgentDeps] as the first param, but custom tools are plain
-    # functions that don't need agent deps.
-    # create_deep_agent returns a MiddlewareAgent wrapping the real Agent —
-    # access the inner agent via .wrapped for tool registration.
+    # Pass custom tools as a FunctionToolset to avoid create_deep_agent's
+    # broken tool registration (it uses agent.tool() which requires RunContext).
     if config.custom_tools:
         from pydantic_ai import Tool
+        from pydantic_ai.toolsets.function import FunctionToolset
 
-        inner = agent.wrapped if hasattr(agent, "wrapped") else agent
-        for tool in config.custom_tools:
-            fn = tool.function if isinstance(tool, Tool) else tool
-            inner.tool_plain(fn)
+        tools = [
+            t if isinstance(t, Tool) else Tool(t, takes_ctx=False)
+            for t in config.custom_tools
+        ]
+        kwargs["toolsets"] = [FunctionToolset(tools)]
 
-    return agent
+    return create_deep_agent(**kwargs)
 
 
 class DeepAgentsRuntime:
