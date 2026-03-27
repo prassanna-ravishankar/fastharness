@@ -6,8 +6,10 @@
 
 [![CI](https://github.com/prassanna-ravishankar/fastharness/actions/workflows/test.yml/badge.svg)](https://github.com/prassanna-ravishankar/fastharness/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/fastharness)](https://pypi.org/project/fastharness/)
+[![Downloads](https://img.shields.io/pypi/dm/fastharness)](https://pypi.org/project/fastharness/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/prassanna-ravishankar/fastharness)
 
 **Turn AI agents into production-ready A2A services — with pluggable runtime backends.**
 
